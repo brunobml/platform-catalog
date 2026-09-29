@@ -1,0 +1,107 @@
+apiVersion: kro.run/v1alpha1
+kind: ResourceGraphDefinition
+metadata:
+  name: messageprocessor
+spec:
+  schema:
+    apiVersion: v1alpha1
+    kind: MessageProcessor
+    spec:
+      name: string
+      environment: string
+      replicas: integer
+      messageRetentionPeriod: string
+    status:
+      queueURL: ${queue.status.queueURL}
+      queueARN: ${queue.status.ackResourceMetadata.arn}
+      environment: ${schema.spec.environment}
+  resources:
+    - id: queue
+      template:
+        apiVersion: sqs.services.k8s.aws/v1alpha1
+        kind: Queue
+        metadata:
+          name: ${schema.spec.name}-${schema.spec.environment}-queue
+          ownerReferences:
+            - apiVersion: kro.run/v1alpha1
+              kind: ${schema.kind}
+              name: ${schema.metadata.name}
+              uid: ${schema.metadata.uid}
+              controller: true
+              blockOwnerDeletion: true
+        spec:
+          queueName: ${schema.spec.name}-${schema.spec.environment}-queue
+          delaySeconds: "0"
+          messageRetentionPeriod: ${schema.spec.messageRetentionPeriod}
+    - id: config
+      template:
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: ${schema.spec.name}-${schema.spec.environment}-config
+          ownerReferences:
+            - apiVersion: kro.run/v1alpha1
+              kind: ${schema.kind}
+              name: ${schema.metadata.name}
+              uid: ${schema.metadata.uid}
+              controller: true
+              blockOwnerDeletion: true
+        data:
+          QUEUE_URL: ${queue.status.queueURL}
+          QUEUE_ARN: ${queue.status.ackResourceMetadata.arn}
+          ENVIRONMENT: ${schema.spec.environment}
+    - id: deployment
+      template:
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: ${schema.spec.name}-${schema.spec.environment}-worker
+          labels:
+            app: ${schema.spec.name}-${schema.spec.environment}-worker
+            environment: ${schema.spec.environment}
+          ownerReferences:
+            - apiVersion: kro.run/v1alpha1
+              kind: ${schema.kind}
+              name: ${schema.metadata.name}
+              uid: ${schema.metadata.uid}
+              controller: true
+              blockOwnerDeletion: true
+        spec:
+          replicas: ${schema.spec.replicas}
+          selector:
+            matchLabels:
+              app: ${schema.spec.name}-${schema.spec.environment}-worker
+          template:
+            metadata:
+              labels:
+                app: ${schema.spec.name}-${schema.spec.environment}-worker
+                environment: ${schema.spec.environment}
+            spec:
+              containers:
+                - name: worker
+                  image: alpine:latest
+                  command:
+                    - /bin/sh
+                    - -c
+                    - |
+                      echo "Worker started for [Env: $ENVIRONMENT] Queue: $QUEUE_URL"
+                      while true; do
+                        echo "Worker [$ENVIRONMENT] polling $QUEUE_URL at $(date)"
+                        sleep 15
+                      done
+                  env:
+                    - name: QUEUE_URL
+                      valueFrom:
+                        configMapKeyRef:
+                          name: ${schema.spec.name}-${schema.spec.environment}-config
+                          key: QUEUE_URL
+                    - name: QUEUE_ARN
+                      valueFrom:
+                        configMapKeyRef:
+                          name: ${schema.spec.name}-${schema.spec.environment}-config
+                          key: QUEUE_ARN
+                    - name: ENVIRONMENT
+                      valueFrom:
+                        configMapKeyRef:
+                          name: ${schema.spec.name}-${schema.spec.environment}-config
+                          key: ENVIRONMENT
