@@ -14,6 +14,7 @@ spec:
     status:
       queueURL: ${queue.status.queueURL}
       queueARN: ${queue.status.ackResourceMetadata.arn}
+      serviceURL: http://${service.metadata.name}.${schema.metadata.namespace}.svc.cluster.local
       environment: ${schema.spec.environment}
   resources:
     - id: queue
@@ -33,6 +34,7 @@ spec:
           queueName: ${schema.spec.name}-${schema.spec.environment}-queue
           delaySeconds: "0"
           messageRetentionPeriod: ${schema.spec.messageRetentionPeriod}
+
     - id: config
       template:
         apiVersion: v1
@@ -50,6 +52,32 @@ spec:
           QUEUE_URL: ${queue.status.queueURL}
           QUEUE_ARN: ${queue.status.ackResourceMetadata.arn}
           ENVIRONMENT: ${schema.spec.environment}
+          APP_NAME: ${schema.spec.name}
+
+    - id: service
+      template:
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: ${schema.spec.name}-${schema.spec.environment}
+          labels:
+            app: ${schema.spec.name}-${schema.spec.environment}-worker
+            environment: ${schema.spec.environment}
+          ownerReferences:
+            - apiVersion: kro.run/v1alpha1
+              kind: ${schema.kind}
+              name: ${schema.metadata.name}
+              uid: ${schema.metadata.uid}
+              controller: true
+              blockOwnerDeletion: true
+        spec:
+          ports:
+            - port: 80
+              targetPort: 8080
+              name: http
+          selector:
+            app: ${schema.spec.name}-${schema.spec.environment}-worker
+
     - id: deployment
       template:
         apiVersion: apps/v1
@@ -78,17 +106,151 @@ spec:
                 environment: ${schema.spec.environment}
             spec:
               containers:
-                - name: worker
-                  image: alpine:latest
+                - name: app
+                  image: python:3.11-alpine
+                  ports:
+                    - containerPort: 8080
+                      name: http
                   command:
-                    - /bin/sh
+                    - python3
+                    - -u
                     - -c
                     - |
-                      echo "Worker started for [Env: $ENVIRONMENT] Queue: $QUEUE_URL"
-                      while true; do
-                        echo "Worker [$ENVIRONMENT] polling $QUEUE_URL at $(date)"
-                        sleep 15
-                      done
+                      import os, time, threading, json, urllib.request, urllib.parse, xml.etree.ElementTree as ET
+                      from http.server import HTTPServer, BaseHTTPRequestHandler
+
+                      QUEUE_URL = os.environ.get('QUEUE_URL', '')
+                      ENV = os.environ.get('ENVIRONMENT', 'unknown')
+                      APP = os.environ.get('APP_NAME', 'app')
+                      POD = os.environ.get('HOSTNAME', 'unknown')
+
+                      stats = {'processed': 0, 'last_msg': None, 'history': []}
+
+                      def sqs_call(params):
+                          data = urllib.parse.urlencode(params).encode()
+                          req = urllib.request.Request(QUEUE_URL, data=data)
+                          req.add_header('Authorization', 'AWS4-HMAC-SHA256 Credential=mock/20260929/us-east-1/sqs/aws4_request, SignedHeaders=host, Signature=mock')
+                          with urllib.request.urlopen(req, timeout=5) as resp:
+                              return resp.read()
+
+                      def worker_loop():
+                          print(f"🚀 Worker started for [{ENV}] listening on {QUEUE_URL}")
+                          while True:
+                              try:
+                                  raw = sqs_call({'Action': 'ReceiveMessage', 'MaxNumberOfMessages': '5', 'WaitTimeSeconds': '5'})
+                                  root = ET.fromstring(raw)
+                                  ns = {'sqs': 'http://queue.amazonaws.com/doc/2012-11-05/'}
+                                  for msg in root.findall('.//sqs:Message', ns):
+                                      mid = msg.find('sqs:MessageId', ns).text
+                                      body = msg.find('sqs:Body', ns).text
+                                      rh = msg.find('sqs:ReceiptHandle', ns).text
+                                      print(f"📦 [{ENV}] Received Order from SQS: {body} (MsgId: {mid})")
+                                      sqs_call({'Action': 'DeleteMessage', 'ReceiptHandle': rh})
+                                      print(f"✔ [{ENV}] Processed and deleted order {mid} from queue")
+                                      stats['processed'] += 1
+                                      stats['last_msg'] = body
+                                      stats['history'].append({'id': mid, 'body': body, 'time': time.strftime('%X')})
+                                      if len(stats['history']) > 15:
+                                          stats['history'].pop(0)
+                              except Exception as e:
+                                  pass
+                              time.sleep(2)
+
+                      class WebHandler(BaseHTTPRequestHandler):
+                          def log_message(self, format, *args):
+                              pass
+                          def do_GET(self):
+                              if self.path == '/healthz':
+                                  self.send_response(200)
+                                  self.end_headers()
+                                  self.wfile.write(b"OK")
+                                  return
+                              self.send_response(200)
+                              self.send_header('Content-Type', 'text/html; charset=utf-8')
+                              self.end_headers()
+                              badge_color = "#10b981" if ENV == "dev" else ("#f59e0b" if ENV == "test" else "#ef4444")
+                              orders_rows = "".join(f"<tr><td>{h['time']}</td><td><code>{h['id'][:12]}...</code></td><td>{h['body']}</td></tr>" for h in reversed(stats['history'])) or "<tr><td colspan='3' style='text-align:center;color:#94a3b8;'>No orders processed yet. Use the form above to submit one!</td></tr>"
+                              html = f"""<!DOCTYPE html>
+                      <html>
+                      <head>
+                        <meta charset="utf-8">
+                        <title>{APP.title()} Microservice - {ENV.upper()}</title>
+                        <style>
+                          body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0b1120; color: #f8fafc; padding: 2rem; margin: 0; }}
+                          .container {{ max-width: 900px; margin: 0 auto; }}
+                          .card {{ background: #1e293b; border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; border: 1px solid #334155; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }}
+                          .badge {{ display: inline-block; padding: 4px 14px; border-radius: 9999px; font-weight: 700; font-size: 0.85rem; text-transform: uppercase; background: {badge_color}; color: white; }}
+                          .stat-num {{ font-size: 2.2rem; font-weight: 800; color: #38bdf8; margin: 0.2rem 0; }}
+                          input[type="text"] {{ width: 70%; padding: 10px 14px; border-radius: 8px; border: 1px solid #475569; background: #0f172a; color: white; font-size: 1rem; }}
+                          button {{ padding: 10px 20px; border-radius: 8px; border: none; background: #3b82f6; color: white; font-weight: 600; font-size: 1rem; cursor: pointer; }}
+                          button:hover {{ background: #2563eb; }}
+                          table {{ width: 100%; border-collapse: collapse; margin-top: 1rem; }}
+                          th, td {{ padding: 10px; border-bottom: 1px solid #334155; text-align: left; }}
+                          th {{ color: #94a3b8; font-size: 0.85rem; text-transform: uppercase; }}
+                          code {{ background: #0f172a; padding: 2px 6px; border-radius: 4px; font-family: monospace; color: #a5f3fc; }}
+                        </style>
+                      </head>
+                      <body>
+                        <div class="container">
+                          <div class="card">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                              <h2 style="margin:0;">📦 {APP.title()} Microservice</h2>
+                              <span class="badge">{ENV} environment</span>
+                            </div>
+                            <hr style="border:0; border-top:1px solid #334155; margin:1rem 0;">
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+                              <div>
+                                <p style="color:#94a3b8; margin:0;">Pod Hostname</p>
+                                <p style="margin:0.2rem 0;"><code>{POD}</code></p>
+                                <p style="color:#94a3b8; margin:0.8rem 0 0 0;">Connected SQS Queue</p>
+                                <p style="margin:0.2rem 0; word-break:break-all;"><code>{QUEUE_URL}</code></p>
+                              </div>
+                              <div style="text-align:right;">
+                                <p style="color:#94a3b8; margin:0;">Total Orders Processed</p>
+                                <div class="stat-num">{stats['processed']}</div>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div class="card">
+                            <h3 style="margin-top:0;">🛒 Submit an Order (Produces to SQS)</h3>
+                            <form method="POST" action="/order" style="display:flex; gap:10px;">
+                              <input type="text" name="item" placeholder="Enter item (e.g. Mechanical Keyboard, Ergonomic Chair)" required />
+                              <button type="submit">Send to SQS Queue</button>
+                            </form>
+                          </div>
+
+                          <div class="card">
+                            <h3 style="margin-top:0;">📋 Live Processed Orders Feed</h3>
+                            <table>
+                              <thead><tr><th>Time</th><th>Message ID</th><th>Order Content</th></tr></thead>
+                              <tbody>{orders_rows}</tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </body>
+                      </html>"""
+                              self.wfile.write(html.encode())
+
+                          def do_POST(self):
+                              content_length = int(self.headers.get('Content-Length', 0))
+                              post_data = self.rfile.read(content_length).decode()
+                              item = post_data
+                              if 'item=' in post_data:
+                                  item = urllib.parse.unquote_plus(post_data.split('item=')[1])
+                              msg_body = json.dumps({'order': item, 'timestamp': time.time(), 'client': 'web-dashboard'})
+                              try:
+                                  sqs_call({'Action': 'SendMessage', 'MessageBody': msg_body})
+                                  print(f"📤 [{ENV}] Web dashboard submitted order to SQS: {msg_body}")
+                              except Exception as e:
+                                  print(f"Error publishing to SQS: {e}")
+                              self.send_response(303)
+                              self.send_header('Location', '/')
+                              self.end_headers()
+
+                      threading.Thread(target=worker_loop, daemon=True).start()
+                      print("🌐 HTTP Web Dashboard listening on port 8080")
+                      HTTPServer(('0.0.0.0', 8080), WebHandler).serve_forever()
                   env:
                     - name: QUEUE_URL
                       valueFrom:
@@ -105,3 +267,8 @@ spec:
                         configMapKeyRef:
                           name: ${schema.spec.name}-${schema.spec.environment}-config
                           key: ENVIRONMENT
+                    - name: APP_NAME
+                      valueFrom:
+                        configMapKeyRef:
+                          name: ${schema.spec.name}-${schema.spec.environment}-config
+                          key: APP_NAME
