@@ -79,6 +79,45 @@ spec:
           selector:
             app: ${schema.spec.name}-${schema.spec.environment}-worker
 
+    - id: ingress
+      template:
+        apiVersion: networking.k8s.io/v1
+        kind: Ingress
+        metadata:
+          name: ${schema.spec.name}-${schema.spec.environment}
+          labels:
+            app: ${schema.spec.name}-${schema.spec.environment}-worker
+            environment: ${schema.spec.environment}
+          ownerReferences:
+            - apiVersion: kro.run/v1alpha1
+              kind: ${schema.kind}
+              name: ${schema.metadata.name}
+              uid: ${schema.metadata.uid}
+              controller: true
+              blockOwnerDeletion: true
+        spec:
+          ingressClassName: traefik
+          rules:
+            - host: ${schema.spec.name}-${schema.spec.environment}.localhost
+              http:
+                paths:
+                  - path: /
+                    pathType: Prefix
+                    backend:
+                      service:
+                        name: ${schema.spec.name}-${schema.spec.environment}
+                        port:
+                          number: 80
+            - http:
+                paths:
+                  - path: /
+                    pathType: Prefix
+                    backend:
+                      service:
+                        name: ${schema.spec.name}-${schema.spec.environment}
+                        port:
+                          number: 80
+
     - id: deployment
       template:
         apiVersion: apps/v1
