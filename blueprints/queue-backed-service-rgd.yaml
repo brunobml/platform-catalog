@@ -15,9 +15,29 @@ spec:
     status:
       queueURL: ${queue.status.queueURL}
       queueARN: ${queue.status.ackResourceMetadata.arn}
+      dlqURL: ${dlq.status.queueURL}
+      dlqARN: ${dlq.status.ackResourceMetadata.arn}
       serviceURL: http://${service.metadata.name}.${schema.metadata.namespace}.svc.cluster.local
       environment: ${schema.spec.environment}
   resources:
+    - id: dlq
+      template:
+        apiVersion: sqs.services.k8s.aws/v1alpha1
+        kind: Queue
+        metadata:
+          name: ${schema.spec.name}-${schema.spec.environment}-dlq
+          ownerReferences:
+            - apiVersion: kro.run/v1alpha1
+              kind: ${schema.kind}
+              name: ${schema.metadata.name}
+              uid: ${schema.metadata.uid}
+              controller: true
+              blockOwnerDeletion: true
+        spec:
+          queueName: ${schema.spec.name}-${schema.spec.environment}-dlq
+          delaySeconds: "0"
+          messageRetentionPeriod: "1209600"
+
     - id: queue
       template:
         apiVersion: sqs.services.k8s.aws/v1alpha1
@@ -35,6 +55,7 @@ spec:
           queueName: ${schema.spec.name}-${schema.spec.environment}-queue
           delaySeconds: "0"
           messageRetentionPeriod: ${schema.spec.messageRetentionPeriod}
+          redrivePolicy: '{"deadLetterTargetArn":"${dlq.status.ackResourceMetadata.arn}","maxReceiveCount":5}'
 
     - id: config
       template:
@@ -52,6 +73,8 @@ spec:
         data:
           QUEUE_URL: ${queue.status.queueURL}
           QUEUE_ARN: ${queue.status.ackResourceMetadata.arn}
+          DLQ_URL: ${dlq.status.queueURL}
+          DLQ_ARN: ${dlq.status.ackResourceMetadata.arn}
           ENVIRONMENT: ${schema.spec.environment}
           APP_NAME: ${schema.spec.name}
           MOTO_ENDPOINT: "http://moto-cloud:5000"
@@ -109,15 +132,6 @@ spec:
                         name: ${schema.spec.name}-${schema.spec.environment}
                         port:
                           number: 80
-            - http:
-                paths:
-                  - path: /
-                    pathType: Prefix
-                    backend:
-                      service:
-                        name: ${schema.spec.name}-${schema.spec.environment}
-                        port:
-                          number: 80
 
     - id: deployment
       template:
@@ -146,10 +160,43 @@ spec:
                 app: ${schema.spec.name}-${schema.spec.environment}-worker
                 environment: ${schema.spec.environment}
             spec:
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 10001
+                runAsGroup: 10001
+                fsGroup: 10001
               containers:
                 - name: app
                   image: ${schema.spec.image}
                   imagePullPolicy: IfNotPresent
+                  securityContext:
+                    allowPrivilegeEscalation: false
+                    capabilities:
+                      drop:
+                        - ALL
+                  resources:
+                    requests:
+                      cpu: 50m
+                      memory: 64Mi
+                    limits:
+                      cpu: 200m
+                      memory: 128Mi
+                  livenessProbe:
+                    httpGet:
+                      path: /healthz
+                      port: 8080
+                    initialDelaySeconds: 10
+                    periodSeconds: 15
+                    timeoutSeconds: 3
+                    failureThreshold: 3
+                  readinessProbe:
+                    httpGet:
+                      path: /healthz
+                      port: 8080
+                    initialDelaySeconds: 5
+                    periodSeconds: 10
+                    timeoutSeconds: 2
+                    failureThreshold: 2
                   ports:
                     - containerPort: 8080
                       name: http
@@ -164,6 +211,11 @@ spec:
                         configMapKeyRef:
                           name: ${schema.spec.name}-${schema.spec.environment}-config
                           key: QUEUE_ARN
+                    - name: DLQ_URL
+                      valueFrom:
+                        configMapKeyRef:
+                          name: ${schema.spec.name}-${schema.spec.environment}-config
+                          key: DLQ_URL
                     - name: ENVIRONMENT
                       valueFrom:
                         configMapKeyRef:
