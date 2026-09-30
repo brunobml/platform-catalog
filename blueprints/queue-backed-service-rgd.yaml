@@ -1,0 +1,181 @@
+apiVersion: kro.run/v1alpha1
+kind: ResourceGraphDefinition
+metadata:
+  name: queuebackedservice
+spec:
+  schema:
+    apiVersion: v1alpha1
+    kind: QueueBackedService
+    spec:
+      name: string
+      environment: string
+      replicas: integer
+      messageRetentionPeriod: string
+      image: string
+    status:
+      queueURL: ${queue.status.queueURL}
+      queueARN: ${queue.status.ackResourceMetadata.arn}
+      serviceURL: http://${service.metadata.name}.${schema.metadata.namespace}.svc.cluster.local
+      environment: ${schema.spec.environment}
+  resources:
+    - id: queue
+      template:
+        apiVersion: sqs.services.k8s.aws/v1alpha1
+        kind: Queue
+        metadata:
+          name: ${schema.spec.name}-${schema.spec.environment}-queue
+          ownerReferences:
+            - apiVersion: kro.run/v1alpha1
+              kind: ${schema.kind}
+              name: ${schema.metadata.name}
+              uid: ${schema.metadata.uid}
+              controller: true
+              blockOwnerDeletion: true
+        spec:
+          queueName: ${schema.spec.name}-${schema.spec.environment}-queue
+          delaySeconds: "0"
+          messageRetentionPeriod: ${schema.spec.messageRetentionPeriod}
+
+    - id: config
+      template:
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: ${schema.spec.name}-${schema.spec.environment}-config
+          ownerReferences:
+            - apiVersion: kro.run/v1alpha1
+              kind: ${schema.kind}
+              name: ${schema.metadata.name}
+              uid: ${schema.metadata.uid}
+              controller: true
+              blockOwnerDeletion: true
+        data:
+          QUEUE_URL: ${queue.status.queueURL}
+          QUEUE_ARN: ${queue.status.ackResourceMetadata.arn}
+          ENVIRONMENT: ${schema.spec.environment}
+          APP_NAME: ${schema.spec.name}
+          MOTO_ENDPOINT: "http://moto-cloud:5000"
+
+    - id: service
+      template:
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: ${schema.spec.name}-${schema.spec.environment}
+          labels:
+            app: ${schema.spec.name}-${schema.spec.environment}-worker
+            environment: ${schema.spec.environment}
+          ownerReferences:
+            - apiVersion: kro.run/v1alpha1
+              kind: ${schema.kind}
+              name: ${schema.metadata.name}
+              uid: ${schema.metadata.uid}
+              controller: true
+              blockOwnerDeletion: true
+        spec:
+          ports:
+            - port: 80
+              targetPort: 8080
+              name: http
+          selector:
+            app: ${schema.spec.name}-${schema.spec.environment}-worker
+
+    - id: ingress
+      template:
+        apiVersion: networking.k8s.io/v1
+        kind: Ingress
+        metadata:
+          name: ${schema.spec.name}-${schema.spec.environment}
+          labels:
+            app: ${schema.spec.name}-${schema.spec.environment}-worker
+            environment: ${schema.spec.environment}
+          ownerReferences:
+            - apiVersion: kro.run/v1alpha1
+              kind: ${schema.kind}
+              name: ${schema.metadata.name}
+              uid: ${schema.metadata.uid}
+              controller: true
+              blockOwnerDeletion: true
+        spec:
+          ingressClassName: traefik
+          rules:
+            - host: ${schema.spec.name}-${schema.spec.environment}.localhost
+              http:
+                paths:
+                  - path: /
+                    pathType: Prefix
+                    backend:
+                      service:
+                        name: ${schema.spec.name}-${schema.spec.environment}
+                        port:
+                          number: 80
+            - http:
+                paths:
+                  - path: /
+                    pathType: Prefix
+                    backend:
+                      service:
+                        name: ${schema.spec.name}-${schema.spec.environment}
+                        port:
+                          number: 80
+
+    - id: deployment
+      template:
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: ${schema.spec.name}-${schema.spec.environment}-worker
+          labels:
+            app: ${schema.spec.name}-${schema.spec.environment}-worker
+            environment: ${schema.spec.environment}
+          ownerReferences:
+            - apiVersion: kro.run/v1alpha1
+              kind: ${schema.kind}
+              name: ${schema.metadata.name}
+              uid: ${schema.metadata.uid}
+              controller: true
+              blockOwnerDeletion: true
+        spec:
+          replicas: ${schema.spec.replicas}
+          selector:
+            matchLabels:
+              app: ${schema.spec.name}-${schema.spec.environment}-worker
+          template:
+            metadata:
+              labels:
+                app: ${schema.spec.name}-${schema.spec.environment}-worker
+                environment: ${schema.spec.environment}
+            spec:
+              containers:
+                - name: app
+                  image: ${schema.spec.image}
+                  imagePullPolicy: IfNotPresent
+                  ports:
+                    - containerPort: 8080
+                      name: http
+                  env:
+                    - name: QUEUE_URL
+                      valueFrom:
+                        configMapKeyRef:
+                          name: ${schema.spec.name}-${schema.spec.environment}-config
+                          key: QUEUE_URL
+                    - name: QUEUE_ARN
+                      valueFrom:
+                        configMapKeyRef:
+                          name: ${schema.spec.name}-${schema.spec.environment}-config
+                          key: QUEUE_ARN
+                    - name: ENVIRONMENT
+                      valueFrom:
+                        configMapKeyRef:
+                          name: ${schema.spec.name}-${schema.spec.environment}-config
+                          key: ENVIRONMENT
+                    - name: APP_NAME
+                      valueFrom:
+                        configMapKeyRef:
+                          name: ${schema.spec.name}-${schema.spec.environment}-config
+                          key: APP_NAME
+                    - name: MOTO_ENDPOINT
+                      valueFrom:
+                        configMapKeyRef:
+                          name: ${schema.spec.name}-${schema.spec.environment}-config
+                          key: MOTO_ENDPOINT
