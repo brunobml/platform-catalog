@@ -112,6 +112,9 @@ spec:
           labels:
             app: ${schema.spec.name}-${schema.spec.environment}-worker
             environment: ${schema.spec.environment}
+          annotations:
+            argocd.argoproj.io/ignore-default-links: "true"
+            link.argocd.argoproj.io/external-link: '${"http://" + schema.spec.name + "-" + schema.spec.environment + ".localhost:" + (schema.spec.environment == "prod" ? "8082" : "8081")}'
           ownerReferences:
             - apiVersion: kro.run/v1alpha1
               kind: ${schema.kind}
