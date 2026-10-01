@@ -1,0 +1,45 @@
+# Phase 3 D.5 (L2-5): input contract for QueueBackedService, enforced at admission.
+#
+# Why a ValidatingAdmissionPolicy instead of schema markers in the RGD: kro refuses to add
+# constraints (required/enum/minimum/maximum) to an existing CRD ("breaking changes
+# detected"), which made the RGD Inactive on nonprod (incident D-14). This policy validates
+# the same contract without touching kro's CRD. It is versioned and promoted with the RGD.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: queuebackedservice-contract
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["kro.run"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["queuebackedservices"]   # status/finalizer subresources are not matched
+  validations:
+    - expression: "has(object.spec.name) && object.spec.name.matches('^[a-z][a-z0-9-]{0,30}$')"
+      message: "spec.name must be a lowercase DNS label of 1-31 characters (it is used in queue and resource names)"
+    - expression: "has(object.spec.environment) && object.spec.environment in ['dev', 'test', 'prod']"
+      message: "spec.environment must be one of: dev, test, prod"
+    - expression: "has(object.spec.replicas) && object.spec.replicas >= 1 && object.spec.replicas <= 10"
+      message: "spec.replicas must be between 1 and 10"
+    - expression: >-
+        has(object.spec.messageRetentionPeriod) &&
+        object.spec.messageRetentionPeriod.matches('^[0-9]+$') &&
+        int(object.spec.messageRetentionPeriod) >= 60 && int(object.spec.messageRetentionPeriod) <= 1209600
+      message: "spec.messageRetentionPeriod must be a number of seconds between 60 and 1209600 (SQS limits)"
+    - expression: "has(object.spec.image) && size(object.spec.image) > 0"
+      message: "spec.image is required"
+    # Guardrail: a namespace's environment cannot be overridden by the instance, so a dev
+    # namespace cannot create prod-named queues (which would also land in the wrong account).
+    - expression: "namespaceObject.metadata.name.endsWith('-' + object.spec.environment)"
+      messageExpression: "'namespace ' + namespaceObject.metadata.name + ' does not match spec.environment=' + object.spec.environment + ' (namespace must end with -<environment>)'"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: queuebackedservice-contract
+spec:
+  policyName: queuebackedservice-contract
+  # Rollout: Warn + Audit first on nonprod to prove existing objects pass, then Deny.
+  validationActions: ["Warn", "Audit"]
