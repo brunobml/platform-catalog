@@ -14,3 +14,7 @@ resources:
   limits:
     cpu: 200m
     memory: 256Mi
+
+reconcile:
+  defaultResyncPeriod: 300
+
