@@ -41,5 +41,5 @@ metadata:
   name: queuebackedservice-contract
 spec:
   policyName: queuebackedservice-contract
-  # Rollout: Warn + Audit first on nonprod to prove existing objects pass, then Deny.
-  validationActions: ["Warn", "Audit"]
+  # Rolled out Warn+Audit first on nonprod (existing objects: 0 warnings), then Deny.
+  validationActions: ["Deny", "Audit"]
