@@ -9,6 +9,11 @@ metadata:
   labels:
     rbac.kro.run/aggregate-to-controller: "true"
 rules:
+  # The instance kind itself: kro reads/updates instances and their status, and needs
+  # finalizers/update because children carry ownerReferences with blockOwnerDeletion.
+  - apiGroups: ["kro.run"]
+    resources: ["queuebackedservices", "queuebackedservices/status", "queuebackedservices/finalizers"]
+    verbs: ["*"]
   - apiGroups: ["sqs.services.k8s.aws"]
     resources: ["queues"]
     verbs: ["*"]

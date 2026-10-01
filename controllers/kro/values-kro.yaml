@@ -5,3 +5,9 @@ resources:
   limits:
     cpu: 250m
     memory: 256Mi
+
+# Phase 3 C.3 (L4-5): least privilege. kro gets only its static role plus ClusterRoles
+# labelled rbac.kro.run/aggregate-to-controller=true (shipped with each blueprint, e.g.
+# blueprints/kro-rbac-queue-backed-service.yaml), instead of cluster-wide */*.
+rbac:
+  mode: aggregation
