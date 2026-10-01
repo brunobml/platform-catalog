@@ -7,11 +7,12 @@ spec:
     apiVersion: v1alpha1
     kind: QueueBackedService
     spec:
-      name: string
-      environment: string
-      replicas: integer
-      messageRetentionPeriod: string
-      image: string
+      # Phase 3 D.5 (L2-5): validated contract; invalid instances are rejected by the API server.
+      name: string | required=true
+      environment: string | enum="dev,test,prod" required=true
+      replicas: integer | default=1 minimum=1 maximum=10
+      messageRetentionPeriod: string | default="345600"
+      image: string | required=true
     status:
       queueURL: ${queue.status.queueURL}
       queueARN: ${queue.status.ackResourceMetadata.arn}
@@ -20,12 +21,25 @@ spec:
       serviceURL: http://${service.metadata.name}.${schema.metadata.namespace}.svc.cluster.local
       environment: ${schema.spec.environment}
   resources:
+    # Phase 3 D.5 (L2-6): per-cluster facts (moto endpoint, ingress port) come from
+    # kube-system/platform-config, managed by gitops-control-plane, not hard-coded here.
+    - id: platformconfig
+      externalRef:
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: platform-config
+          namespace: kube-system
+
     - id: dlq
       template:
         apiVersion: sqs.services.k8s.aws/v1alpha1
         kind: Queue
         metadata:
           name: ${schema.spec.name}-${schema.spec.environment}-dlq
+          annotations:
+            # Phase 3 D.4 (L3-9): deleting a prod instance must not delete its queues.
+            services.k8s.aws/deletion-policy: '${schema.spec.environment == "prod" ? "retain" : "delete"}'
           ownerReferences:
             - apiVersion: kro.run/v1alpha1
               kind: ${schema.kind}
@@ -44,6 +58,9 @@ spec:
         kind: Queue
         metadata:
           name: ${schema.spec.name}-${schema.spec.environment}-queue
+          annotations:
+            # Phase 3 D.4 (L3-9): deleting a prod instance must not delete its queues.
+            services.k8s.aws/deletion-policy: '${schema.spec.environment == "prod" ? "retain" : "delete"}'
           ownerReferences:
             - apiVersion: kro.run/v1alpha1
               kind: ${schema.kind}
@@ -77,7 +94,7 @@ spec:
           DLQ_ARN: ${dlq.status.ackResourceMetadata.arn}
           ENVIRONMENT: ${schema.spec.environment}
           APP_NAME: ${schema.spec.name}
-          MOTO_ENDPOINT: "http://moto-cloud:5000"
+          MOTO_ENDPOINT: ${platformconfig.data.MOTO_ENDPOINT}
 
     - id: service
       template:
@@ -114,7 +131,7 @@ spec:
             environment: ${schema.spec.environment}
           annotations:
             argocd.argoproj.io/ignore-default-links: "true"
-            link.argocd.argoproj.io/external-link: '${"http://" + schema.spec.name + "-" + schema.spec.environment + ".localhost:" + (schema.spec.environment == "prod" ? "8082" : "8081")}'
+            link.argocd.argoproj.io/external-link: '${"http://" + schema.spec.name + "-" + schema.spec.environment + ".localhost:" + platformconfig.data.INGRESS_PORT}'
           ownerReferences:
             - apiVersion: kro.run/v1alpha1
               kind: ${schema.kind}
@@ -229,6 +246,12 @@ spec:
                   ports:
                     - containerPort: 8080
                       name: http
+                  # Phase 3 D.1: per-environment cloud credentials (local stand-in for
+                  # IRSA / Pod Identity). optional, so absent Secret = unchanged behaviour.
+                  envFrom:
+                    - secretRef:
+                        name: ${schema.spec.name}-${schema.spec.environment}-aws
+                        optional: true
                   env:
                     - name: PYTHONDONTWRITEBYTECODE
                       value: "1"
@@ -342,3 +365,38 @@ spec:
               ports:
                 - protocol: TCP
                   port: 5000
+
+    # Phase 3 C.4 (PV2-2): namespace-wide default deny. Any pod in the instance namespace
+    # that no other policy allows gets DNS only. The worker keeps its own allow-list
+    # (networkpolicy above); NetworkPolicies are additive.
+    - id: nsdefaultdeny
+      template:
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          name: ${schema.spec.name}-${schema.spec.environment}-ns-default-deny
+          labels:
+            environment: ${schema.spec.environment}
+          ownerReferences:
+            - apiVersion: kro.run/v1alpha1
+              kind: ${schema.kind}
+              name: ${schema.metadata.name}
+              uid: ${schema.metadata.uid}
+              controller: true
+              blockOwnerDeletion: true
+        spec:
+          podSelector: {}
+          policyTypes:
+            - Ingress
+            - Egress
+          egress:
+            - to:
+                - namespaceSelector: {}
+                  podSelector:
+                    matchLabels:
+                      k8s-app: kube-dns
+              ports:
+                - protocol: UDP
+                  port: 53
+                - protocol: TCP
+                  port: 53
