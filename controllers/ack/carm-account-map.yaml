@@ -1,0 +1,12 @@
+# Phase 3 D.3 (L4-4): ACK Cross-Account Resource Management. A namespace annotated
+# services.k8s.aws/owner-account-id=<account> makes ACK assume the mapped role and create its
+# resources in that account. Lab accounts (moto): nonprod 111111111111, prod 222222222222.
+# Production equivalent: real AWS accounts per environment, roles trusted via IRSA/Pod Identity.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ack-role-account-map
+  namespace: ack-system
+data:
+  "111111111111": arn:aws:iam::111111111111:role/ack-sqs-controller
+  "222222222222": arn:aws:iam::222222222222:role/ack-sqs-controller
