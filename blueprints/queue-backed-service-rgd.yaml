@@ -136,6 +136,24 @@ spec:
                         port:
                           number: 80
 
+    - id: serviceaccount
+      template:
+        apiVersion: v1
+        kind: ServiceAccount
+        metadata:
+          name: ${schema.spec.name}-${schema.spec.environment}-sa
+          labels:
+            app: ${schema.spec.name}-${schema.spec.environment}-worker
+            environment: ${schema.spec.environment}
+          ownerReferences:
+            - apiVersion: kro.run/v1alpha1
+              kind: ${schema.kind}
+              name: ${schema.metadata.name}
+              uid: ${schema.metadata.uid}
+              controller: true
+              blockOwnerDeletion: true
+        automountServiceAccountToken: false
+
     - id: deployment
       template:
         apiVersion: apps/v1
@@ -163,20 +181,28 @@ spec:
                 app: ${schema.spec.name}-${schema.spec.environment}-worker
                 environment: ${schema.spec.environment}
             spec:
+              serviceAccountName: ${serviceaccount.metadata.name}
+              automountServiceAccountToken: false
               securityContext:
                 runAsNonRoot: true
                 runAsUser: 10001
                 runAsGroup: 10001
                 fsGroup: 10001
+                seccompProfile:
+                  type: RuntimeDefault
               containers:
                 - name: app
                   image: ${schema.spec.image}
                   imagePullPolicy: IfNotPresent
                   securityContext:
                     allowPrivilegeEscalation: false
+                    readOnlyRootFilesystem: true
                     capabilities:
                       drop:
                         - ALL
+                  volumeMounts:
+                    - name: tmp
+                      mountPath: /tmp
                   resources:
                     requests:
                       cpu: 50m
@@ -204,6 +230,8 @@ spec:
                     - containerPort: 8080
                       name: http
                   env:
+                    - name: PYTHONDONTWRITEBYTECODE
+                      value: "1"
                     - name: QUEUE_URL
                       valueFrom:
                         configMapKeyRef:
@@ -234,3 +262,30 @@ spec:
                         configMapKeyRef:
                           name: ${schema.spec.name}-${schema.spec.environment}-config
                           key: MOTO_ENDPOINT
+              volumes:
+                - name: tmp
+                  emptyDir: {}
+
+    - id: pdb
+      includeWhen:
+        - ${schema.spec.replicas > 1}
+      template:
+        apiVersion: policy/v1
+        kind: PodDisruptionBudget
+        metadata:
+          name: ${schema.spec.name}-${schema.spec.environment}-pdb
+          labels:
+            app: ${schema.spec.name}-${schema.spec.environment}-worker
+            environment: ${schema.spec.environment}
+          ownerReferences:
+            - apiVersion: kro.run/v1alpha1
+              kind: ${schema.kind}
+              name: ${schema.metadata.name}
+              uid: ${schema.metadata.uid}
+              controller: true
+              blockOwnerDeletion: true
+        spec:
+          minAvailable: 1
+          selector:
+            matchLabels:
+              app: ${schema.spec.name}-${schema.spec.environment}-worker
