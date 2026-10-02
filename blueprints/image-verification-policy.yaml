@@ -1,0 +1,55 @@
+# Phase 4 B.4 (L4-8): only images built, scanned and signed by the orders-processor CI may run in
+# tenant namespaces. Kyverno verifies, at admission, that every orders-processor image carries:
+#   1. a keyless cosign signature from the CI workflow identity (GitHub OIDC), and
+#   2. an SPDX SBOM attestation signed by the same identity.
+# Scope: Pods in namespaces labelled platform.lab/image-verification=enabled (set by the tenant
+# ApplicationSets). Kyverno's webhooks only see those namespaces (controllers/kyverno values).
+# Shipped with the blueprints, so it is promoted like them: nonprod (main) first, prod by tag.
+# Rollout (review remark R-2): Audit on nonprod -> Deny on nonprod -> prod runs the signed
+# digest -> prod tag with Deny.
+apiVersion: policies.kyverno.io/v1
+kind: ImageValidatingPolicy
+metadata:
+  name: tenant-images-signed
+  annotations:
+    policies.kyverno.io/description: "orders-processor images must be signed and SBOM-attested by its CI workflow"
+spec:
+  validationActions: [Audit]
+  # Owner decision O-3: fail closed for tenant namespaces if Kyverno is unavailable.
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        platform.lab/image-verification: "enabled"
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+  # Pods only: kro owns the Deployments, so no autogen rules on pod controllers (a rejected
+  # Deployment would degrade the kro instance instead of surfacing as a pod admission event).
+  autogen:
+    podControllers:
+      controllers: []
+  matchImageReferences:
+    - glob: "ghcr.io/brunobml/orders-processor*"
+  validationConfigurations:
+    mutateDigest: true
+    verifyDigest: true
+    required: true
+  attestors:
+    - name: ci
+      cosign:
+        keyless:
+          identities:
+            - issuer: https://token.actions.githubusercontent.com
+              subjectRegExp: '^https://github\.com/brunobml/orders-processor/\.github/workflows/ci\.yaml@refs/(heads/main|tags/v[0-9.]+)$'
+  attestations:
+    - name: sbom
+      intoto:
+        type: https://spdx.dev/Document
+  validations:
+    - expression: "images.containers.map(image, verifyImageSignatures(image, [attestors.ci])).all(e, e > 0)"
+      message: "orders-processor images must be signed by the orders-processor CI workflow (cosign keyless)"
+    - expression: "images.containers.map(image, verifyAttestationSignatures(image, attestations.sbom, [attestors.ci])).all(e, e > 0)"
+      message: "orders-processor images must carry an SPDX SBOM attestation from the orders-processor CI workflow"
