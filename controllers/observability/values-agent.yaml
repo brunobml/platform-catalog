@@ -78,22 +78,15 @@ serverFiles:
         kubernetes_sd_configs: [{role: endpoints, namespaces: {names: [kyverno]}}]
         relabel_configs:
           - {source_labels: [__meta_kubernetes_service_name], regex: kyverno-svc-metrics, action: keep}
+          # endpoints discovery also lists the pod's other ports (webhook 9443); keep the metrics port only
+          - {source_labels: [__meta_kubernetes_endpoint_port_name], regex: metrics-port, action: keep}
           - {source_labels: [__meta_kubernetes_pod_name], target_label: pod}
       - job_name: kube-state-metrics
         kubernetes_sd_configs: [{role: endpoints, namespaces: {names: [monitoring]}}]
         relabel_configs:
           - {source_labels: [__meta_kubernetes_service_name], regex: ".*kube-state-metrics", action: keep}
-      # Container CPU/memory only (keeps the remote-write volume small).
-      - job_name: cadvisor
-        scheme: https
-        tls_config: {ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt}
-        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
-        kubernetes_sd_configs: [{role: node}]
-        relabel_configs:
-          - {target_label: __address__, replacement: kubernetes.default.svc:443}
-          - {source_labels: [__meta_kubernetes_node_name], regex: "(.+)", target_label: __metrics_path__, replacement: "/api/v1/nodes/$1/proxy/metrics/cadvisor"}
-        metric_relabel_configs:
-          - {source_labels: [__name__], regex: "container_(cpu_usage_seconds_total|memory_working_set_bytes)", action: keep}
+      # No cadvisor/kubelet job on purpose: scraping it needs `nodes/proxy`, which also allows
+      # kubelet API access (exec into pods); too much power for a metrics agent (Phase 5 A.3).
 
 alertmanager:
   enabled: false
