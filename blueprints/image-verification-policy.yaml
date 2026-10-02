@@ -17,6 +17,11 @@ spec:
   validationActions: [Audit]
   # Owner decision O-3: fail closed for tenant namespaces if Kyverno is unavailable.
   failurePolicy: Fail
+  # An uncached verification fetches signature + SBOM attestation from GHCR and Sigstore; the
+  # default 10 s webhook timeout was exceeded once on nonprod (pod creation retried by the
+  # ReplicaSet). 30 s is the Kubernetes maximum; verified results are cached by Kyverno.
+  webhookConfiguration:
+    timeoutSeconds: 30
   matchConstraints:
     namespaceSelector:
       matchLabels:
