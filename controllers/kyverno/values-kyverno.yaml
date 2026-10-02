@@ -43,3 +43,9 @@ webhooksCleanup:
 test:
   image:
     tag: "v1.19.1@sha256:31bb42ce7f5b2e27c1cf633aeff4f0cad1f5bb63761e2cb09f0e25cdd26572bf"
+
+# The kyverno-api subchart renders `labels: {}` on the policies.kyverno.io CRDs when no label
+# is set; server-side apply never stores an empty map, so Argo CD would show them OutOfSync.
+kyverno-api:
+  labels:
+    platform.lab/addon: kyverno
