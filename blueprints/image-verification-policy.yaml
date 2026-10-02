@@ -14,7 +14,7 @@ metadata:
   annotations:
     policies.kyverno.io/description: "orders-processor images must be signed and SBOM-attested by its CI workflow"
 spec:
-  validationActions: [Audit]
+  validationActions: [Deny]
   # Owner decision O-3: fail closed for tenant namespaces if Kyverno is unavailable.
   failurePolicy: Fail
   # An uncached verification fetches signature + SBOM attestation from GHCR and Sigstore; the
