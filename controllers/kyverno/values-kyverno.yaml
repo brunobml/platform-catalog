@@ -1,0 +1,45 @@
+# Phase 4 B.3: Kyverno on the spokes, used only for image signature verification (L4-8).
+# Deployed by the addons-spoke-kyverno ApplicationSet (gitops-control-plane) at this cluster's
+# blueprints-revision, so Kyverno config is promoted like the blueprints.
+#
+# Footprint: admission controller only, one replica; background, cleanup and reports
+# controllers are off (no mutate-existing / generate / cleanup policies are used here).
+admissionController:
+  replicas: 1
+  container:
+    image:
+      tag: "v1.19.1@sha256:b31d8511ae5fd6010e2a01ea72ebae08eb82fa51d91af14a1d9fe989949b4edb"
+    resources:
+      requests: {cpu: 100m, memory: 128Mi}
+      limits: {memory: 512Mi}
+  initContainer:
+    image:
+      tag: "v1.19.1@sha256:c25c47461f06f2845a48c319ae86fbbc1730a7b9ed5b701889c9dc1f9ee94b09"
+backgroundController:
+  enabled: false
+cleanupController:
+  enabled: false
+reportsController:
+  enabled: false
+
+config:
+  webhooks:
+    # Owner decision O-3: Kyverno admission applies ONLY to namespaces that opt in with this
+    # label (tenant namespaces, set by the tenant ApplicationSets). kube-system, kyverno and the
+    # platform controllers are never in scope, so a Kyverno outage cannot block them even with
+    # failurePolicy Fail.
+    namespaceSelector:
+      matchLabels:
+        platform.lab/image-verification: "enabled"
+
+# Hook / test images pinned by digest too (CRD migration Job runs as an Argo CD PostSync hook).
+crds:
+  migration:
+    image:
+      tag: "v1.19.1@sha256:ced7b2be0b04250cabfe695f15307f69eb715fe23234816388af4f3812915b2a"
+webhooksCleanup:
+  image:
+    tag: "v1.19.1@sha256:31bb42ce7f5b2e27c1cf633aeff4f0cad1f5bb63761e2cb09f0e25cdd26572bf"
+test:
+  image:
+    tag: "v1.19.1@sha256:31bb42ce7f5b2e27c1cf633aeff4f0cad1f5bb63761e2cb09f0e25cdd26572bf"
