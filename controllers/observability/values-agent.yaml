@@ -81,6 +81,11 @@ serverFiles:
           # endpoints discovery also lists the pod's other ports (webhook 9443); keep the metrics port only
           - {source_labels: [__meta_kubernetes_endpoint_port_name], regex: metrics-port, action: keep}
           - {source_labels: [__meta_kubernetes_pod_name], target_label: pod}
+      # Phase 5 B.2: synthetic end-to-end order probe (platform-probes namespace)
+      - job_name: synthetic-order-probe
+        kubernetes_sd_configs: [{role: endpoints, namespaces: {names: [platform-probes]}}]
+        relabel_configs:
+          - {source_labels: [__meta_kubernetes_endpoint_port_name], regex: metrics, action: keep}
       - job_name: kube-state-metrics
         kubernetes_sd_configs: [{role: endpoints, namespaces: {names: [monitoring]}}]
         relabel_configs:
