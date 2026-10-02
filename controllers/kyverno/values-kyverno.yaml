@@ -44,8 +44,11 @@ test:
   image:
     tag: "v1.19.1@sha256:31bb42ce7f5b2e27c1cf633aeff4f0cad1f5bb63761e2cb09f0e25cdd26572bf"
 
-# The kyverno-api subchart renders `labels: {}` on the policies.kyverno.io CRDs when no label
-# is set; server-side apply never stores an empty map, so Argo CD would show them OutOfSync.
+# The kyverno-api subchart renders `labels: {}` and `annotations: {}` on the policies.kyverno.io
+# CRDs when none are set; server-side apply never stores an empty map, so Argo CD would show
+# them OutOfSync forever. One label and one annotation make the rendered metadata storable.
 kyverno-api:
   labels:
     platform.lab/addon: kyverno
+  annotations:
+    platform.lab/managed-by: addons-spoke-kyverno
