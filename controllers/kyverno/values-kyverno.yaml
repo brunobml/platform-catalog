@@ -2,10 +2,15 @@
 # Deployed by the addons-spoke-kyverno ApplicationSet (gitops-control-plane) at this cluster's
 # blueprints-revision, so Kyverno config is promoted like the blueprints.
 #
-# Footprint: admission controller only, one replica; background, cleanup and reports
+# Footprint: admission controller only (2 replicas since Phase 5 C.1); background, cleanup and reports
 # controllers are off (no mutate-existing / generate / cleanup policies are used here).
 admissionController:
-  replicas: 1
+  # Phase 5 C.1 (D-10): two replicas + PDB, so a rolling restart or the loss of one pod never
+  # leaves tenant namespaces without admission (spike C.1a). Default anti-affinity spreads them.
+  replicas: 2
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
   container:
     image:
       tag: "v1.19.1@sha256:b31d8511ae5fd6010e2a01ea72ebae08eb82fa51d91af14a1d9fe989949b4edb"
