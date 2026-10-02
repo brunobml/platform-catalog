@@ -100,6 +100,14 @@ serverFiles:
         kubernetes_sd_configs: [{role: endpoints, namespaces: {names: [platform-probes]}}]
         relabel_configs:
           - {source_labels: [__meta_kubernetes_endpoint_port_name], regex: metrics, action: keep}
+      # Phase 5 F.4: Alloy log shipping health (loki.write counters only)
+      - job_name: alloy
+        kubernetes_sd_configs: [{role: endpoints, namespaces: {names: [monitoring]}}]
+        relabel_configs:
+          - {source_labels: [__meta_kubernetes_service_name], regex: alloy, action: keep}
+          - {source_labels: [__meta_kubernetes_endpoint_port_name], regex: http-metrics, action: keep}
+        metric_relabel_configs:
+          - {source_labels: [__name__], regex: "loki_write_(sent_entries_total|dropped_entries_total|request_duration_seconds_count)", action: keep}
       - job_name: kube-state-metrics
         kubernetes_sd_configs: [{role: endpoints, namespaces: {names: [monitoring]}}]
         relabel_configs:
