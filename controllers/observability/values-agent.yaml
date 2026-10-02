@@ -1,0 +1,109 @@
+# Phase 5 A.3: Prometheus in AGENT mode on each spoke (chart prometheus-community/prometheus 29.35.0).
+# Scrapes the spoke's platform controllers and sends everything to the hub with remote write.
+# Deployed by addons-spoke-observability (gitops-control-plane) at the cluster's blueprints-revision.
+# Per-spoke values come from the ApplicationSet: external label `cluster` and the basic-auth user.
+#
+# Spike A.3a (2026-10-02): the chart has no agent mode. Its default flags (--storage.tsdb.*) and
+# its default rule_files are refused by Prometheus v3.15 in agent mode, hence the explicit flag
+# set and `rule_files: null` below.
+
+configmapReload:
+  prometheus:
+    image:
+      digest: "sha256:06b52bd4dbe3ed6dd5905aadaf8b9987d9da4c31d37bb86deaadae68cee2d26b"  # v0.94.1
+
+server:
+  image:
+    digest: "sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e"  # v3.15.0
+  defaultFlagsOverride:
+    - --agent
+    - --config.file=/etc/config/prometheus.yml
+    - --storage.agent.path=/data
+    - --web.enable-lifecycle
+  persistentVolume:
+    enabled: false          # agent WAL on emptyDir; the hub keeps the data
+  resources:
+    requests: {cpu: 50m, memory: 96Mi}
+    limits: {memory: 384Mi}
+  global:
+    scrape_interval: 30s
+    external_labels:
+      cluster: SET-BY-APPLICATIONSET
+  extraSecretMounts:
+    - name: remote-write
+      mountPath: /etc/secrets/remote-write
+      secretName: remote-write-credentials   # created by scripts/setup-observability-secrets.sh
+      readOnly: true
+  remoteWrite:
+    - url: http://k3d-hub-cluster-serverlb/api/v1/write
+      basic_auth:
+        username: SET-BY-APPLICATIONSET
+        password_file: /etc/secrets/remote-write/password
+
+# The chart's default jobs (kubernetes-pods, pushgateway, ...) are not used on spokes.
+scrapeConfigs:
+  prometheus: {enabled: false}
+  kubernetes-api-servers: {enabled: false}
+  kubernetes-nodes: {enabled: false}
+  kubernetes-nodes-cadvisor: {enabled: false}
+  kubernetes-service-endpoints: {enabled: false}
+  kubernetes-service-endpoints-slow: {enabled: false}
+  prometheus-pushgateway: {enabled: false}
+  kubernetes-services: {enabled: false}
+  kubernetes-pods: {enabled: false}
+  kubernetes-pods-slow: {enabled: false}
+
+serverFiles:
+  prometheus.yml:
+    rule_files: null        # not allowed in agent mode
+    # Chart quirk: with rule_files and scrape_configs consumed, the template would append a bare
+    # "{}" and break the YAML; one harmless key avoids that.
+    scrape_config_files: []
+    scrape_configs:
+      - job_name: agent
+        static_configs: [{targets: ["localhost:9090"]}]
+      # Platform controllers, discovered as pods (review remark R-0: ACK runs as
+      # ack-sqs-controller-sqs-chart-* in ack-system; selection is by namespace + metrics port).
+      - job_name: kro
+        kubernetes_sd_configs: [{role: pod, namespaces: {names: [kro]}}]
+        relabel_configs:
+          - {source_labels: [__meta_kubernetes_pod_container_port_number], regex: "8078", action: keep}
+          - {source_labels: [__meta_kubernetes_pod_name], target_label: pod}
+      - job_name: ack-sqs
+        kubernetes_sd_configs: [{role: pod, namespaces: {names: [ack-system]}}]
+        relabel_configs:
+          - {source_labels: [__meta_kubernetes_pod_container_port_number], regex: "8080", action: keep}
+          - {source_labels: [__meta_kubernetes_pod_name], target_label: pod}
+      - job_name: kyverno
+        kubernetes_sd_configs: [{role: endpoints, namespaces: {names: [kyverno]}}]
+        relabel_configs:
+          - {source_labels: [__meta_kubernetes_service_name], regex: kyverno-svc-metrics, action: keep}
+          - {source_labels: [__meta_kubernetes_pod_name], target_label: pod}
+      - job_name: kube-state-metrics
+        kubernetes_sd_configs: [{role: endpoints, namespaces: {names: [monitoring]}}]
+        relabel_configs:
+          - {source_labels: [__meta_kubernetes_service_name], regex: ".*kube-state-metrics", action: keep}
+      # Container CPU/memory only (keeps the remote-write volume small).
+      - job_name: cadvisor
+        scheme: https
+        tls_config: {ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt}
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        kubernetes_sd_configs: [{role: node}]
+        relabel_configs:
+          - {target_label: __address__, replacement: kubernetes.default.svc:443}
+          - {source_labels: [__meta_kubernetes_node_name], regex: "(.+)", target_label: __metrics_path__, replacement: "/api/v1/nodes/$1/proxy/metrics/cadvisor"}
+        metric_relabel_configs:
+          - {source_labels: [__name__], regex: "container_(cpu_usage_seconds_total|memory_working_set_bytes)", action: keep}
+
+alertmanager:
+  enabled: false
+prometheus-node-exporter:
+  enabled: false
+prometheus-pushgateway:
+  enabled: false
+kube-state-metrics:
+  image:
+    sha: "sha256:42cfe3723a5f058171c627537fb57a3ea0f26e4380fa18555a95cb1a1b4cfc5b"  # v2.20.0
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+    limits: {memory: 128Mi}
