@@ -8,6 +8,8 @@
 # - Evaluation occurs directly inside kube-apiserver without an out-of-process webhook network hop.
 # - It cannot fail open or experience webhook timeouts.
 # - Scope: Pods in namespaces labelled platform.lab/image-verification=enabled.
+# - Ephemeral containers (kubectl debug) are added through the pods/ephemeralcontainers
+#   subresource, which a rule for "pods" alone does not match (validation-01 V-3).
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -22,7 +24,7 @@ spec:
       - apiGroups: [""]
         apiVersions: ["v1"]
         operations: ["CREATE", "UPDATE"]
-        resources: ["pods"]
+        resources: ["pods", "pods/ephemeralcontainers"]
   validations:
     - expression: "object.spec.containers.all(c, c.image.startsWith('ghcr.io/brunobml/'))"
       message: "All container images in tenant namespaces must originate from 'ghcr.io/brunobml/' (O-2 allowlist)"
