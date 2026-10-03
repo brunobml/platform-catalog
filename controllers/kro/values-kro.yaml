@@ -1,3 +1,8 @@
+# 2026-10-03 Step 0.6 (L3-1): pinned by digest (multi-arch index digest of the tag). Bump together with
+# chartVersion in gitops-control-plane applicationsets/addons-spoke.yaml.
+image:
+  tag: "v0.9.4@sha256:eaf9fbaddd9d7f6cf400a8d47ab066b14cbef22b92a79be7bbdc7b3673376fb9"
+
 resources:
   requests:
     cpu: 50m

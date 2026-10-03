@@ -1,3 +1,8 @@
+# 2026-10-03 Step 0.6 (L3-1): pinned by digest (multi-arch index digest of the tag). Bump together with
+# chartVersion in gitops-control-plane applicationsets/addons-spoke.yaml.
+image:
+  tag: "1.7.1@sha256:0b5060012257c1b0beb742f670e2d375ab831c364bc484a9e184b844d21ff420"
+
 aws:
   region: "us-east-1"
   endpoint_url: "http://moto-cloud:5000"
