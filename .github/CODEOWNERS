@@ -1,0 +1,9 @@
+# CODEOWNERS for platform-catalog
+# Platform blueprints, admission policies, and controller configurations require owner approval
+
+# Global repository owner
+* @brunobml
+
+# Blueprints, policies, and controllers
+/blueprints/ @brunobml
+/controllers/ @brunobml
