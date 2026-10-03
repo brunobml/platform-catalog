@@ -1,0 +1,44 @@
+# Step 0.3 (L4-2, Owner Decision O-2): Only images from ghcr.io/brunobml/* are permitted in tenant namespaces.
+#
+# Unlike Kyverno ImageValidatingPolicy which matches ghcr.io/brunobml/orders-processor* to verify
+# cosign signatures and SBOM attestations, this native ValidatingAdmissionPolicy prevents any untrusted
+# image (e.g. alpine:latest, docker.io/*) from running in tenant namespaces.
+#
+# Because it is a native Kubernetes ValidatingAdmissionPolicy:
+# - Evaluation occurs directly inside kube-apiserver without an out-of-process webhook network hop.
+# - It cannot fail open or experience webhook timeouts.
+# - Scope: Pods in namespaces labelled platform.lab/image-verification=enabled.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: tenant-image-registry-allowlist
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        platform.lab/image-verification: "enabled"
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+  validations:
+    - expression: "object.spec.containers.all(c, c.image.startsWith('ghcr.io/brunobml/'))"
+      message: "All container images in tenant namespaces must originate from 'ghcr.io/brunobml/' (O-2 allowlist)"
+    - expression: "!has(object.spec.initContainers) || object.spec.initContainers.all(c, c.image.startsWith('ghcr.io/brunobml/'))"
+      message: "All initContainer images in tenant namespaces must originate from 'ghcr.io/brunobml/' (O-2 allowlist)"
+    - expression: "!has(object.spec.ephemeralContainers) || object.spec.ephemeralContainers.all(c, c.image.startsWith('ghcr.io/brunobml/'))"
+      message: "All ephemeralContainer images in tenant namespaces must originate from 'ghcr.io/brunobml/' (O-2 allowlist)"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: tenant-image-registry-allowlist
+spec:
+  policyName: tenant-image-registry-allowlist
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        platform.lab/image-verification: "enabled"
+  validationActions: ["Deny", "Audit"]
