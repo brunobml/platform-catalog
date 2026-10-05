@@ -1,0 +1,52 @@
+# Tenant IaC P2: input contract for TeamEKSCluster, enforced at admission (plan v0.3 §4).
+#
+# A ValidatingAdmissionPolicy instead of schema markers in the RGD, for the same reason as
+# queuebackedservice-contract: kro refuses to add constraints to an existing CRD (Phase 3 D-14),
+# so the contract must be able to change without touching kro's CRD. It is versioned and
+# promoted with the RGD. It is the only version check: moto accepts any Kubernetes version
+# string and defaults to 1.19 (P0 gate 7).
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: teamekscluster-contract
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["kro.run"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["teameksclusters"]   # status/finalizer subresources are not matched
+  validations:
+    # Names: <team>-<name>-<env>-cluster must fit IAM's 64-character role name (20+1+20+1+4+8 = 54)
+    - expression: "has(object.spec.team) && object.spec.team.matches('^[a-z][a-z0-9-]{1,19}$') && !object.spec.team.endsWith('-')"
+      message: "spec.team must be a lowercase DNS label of 2-20 characters (it is part of every AWS name)"
+    - expression: "has(object.spec.name) && object.spec.name.matches('^[a-z][a-z0-9-]{1,19}$') && !object.spec.name.endsWith('-')"
+      message: "spec.name must be a lowercase DNS label of 2-20 characters (it is part of every AWS name)"
+    - expression: "has(object.spec.env) && object.spec.env in ['dev', 'test', 'prod']"
+      message: "spec.env must be one of: dev, test, prod"
+    # The namespace decides the account (CARM annotation), so team and env must match it
+    - expression: "namespaceObject.metadata.name == 'iac-' + object.spec.team + '-' + object.spec.env"
+      messageExpression: "'namespace ' + namespaceObject.metadata.name + ' does not match team/env: expected iac-' + object.spec.team + '-' + object.spec.env"
+    - expression: "has(object.spec.kubernetesVersion) && object.spec.kubernetesVersion in ['1.32', '1.33', '1.34']"
+      message: "spec.kubernetesVersion must be one of: 1.32, 1.33, 1.34"
+    - expression: "has(object.spec.network) && object.spec.network == 'platform-default'"
+      message: "spec.network must be platform-default (the platform owns the network)"
+    - expression: "has(object.spec.nodeGroup) && has(object.spec.nodeGroup.instanceType) && object.spec.nodeGroup.instanceType in ['t3.medium', 't3.large', 'm5.large']"
+      message: "spec.nodeGroup.instanceType must be one of: t3.medium, t3.large, m5.large"
+    - expression: >-
+        has(object.spec.nodeGroup) && has(object.spec.nodeGroup.minSize) &&
+        has(object.spec.nodeGroup.desiredSize) && has(object.spec.nodeGroup.maxSize) &&
+        object.spec.nodeGroup.minSize >= 1 &&
+        object.spec.nodeGroup.minSize <= object.spec.nodeGroup.desiredSize &&
+        object.spec.nodeGroup.desiredSize <= object.spec.nodeGroup.maxSize &&
+        object.spec.nodeGroup.maxSize <= (object.spec.env == 'prod' ? 5 : 3)
+      message: "spec.nodeGroup sizes must satisfy 1 <= minSize <= desiredSize <= maxSize, with maxSize <= 3 (dev/test) or <= 5 (prod)"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: teamekscluster-contract
+spec:
+  policyName: teamekscluster-contract
+  validationActions: ["Deny", "Audit"]

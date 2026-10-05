@@ -1,0 +1,166 @@
+# Tenant IaC P2 (plan docs/roadmaps/2026-10-04-tenant-iac-team-clusters-plan.md v0.3 in gitops-control-plane):
+# a team's EKS cluster (tier 2) inside the platform-owned network (tier 1, namespace platform-network).
+# Starting point: the P0 spike's final rgd.yaml (implemented-01, validated-01). The rules it encodes:
+#   - AWS names are <team>-<name>-<env> (unique per account across teams; P0 F-1).
+#   - Annotations are one CEL map per environment: prod = retain + adopt-or-create; nonprod = delete,
+#     without any adoption annotation (an empty adoption-policy is Terminal; F-2, F-8).
+#   - The EKS Cluster never declares deletionProtection, controlPlaneScalingConfig or
+#     controlPlaneEgressMode: moto never returns them, so declaring them makes ACK call
+#     UpdateClusterConfig, which in moto drops the subnets, and blocks deletion (F-4). The Cluster
+#     therefore never reports ACK.ResourceSynced=True; readiness comes from status.status (gate 1).
+#   - Deterministic defaults are declared and the rest is ignore-field-drift, so nothing updates
+#     at every resync (F-5).
+#   - Every child has a readyWhen that is false while ACK marks it Terminal, so kro's own Ready
+#     condition (and Argo CD's view of the instance) is not "ready" for a broken claim (F-3).
+# The input contract (allowed values, ranges, namespace) is the ValidatingAdmissionPolicy in
+# team-eks-cluster-policy.yaml, not schema markers here (Phase 3 D-14).
+apiVersion: kro.run/v1alpha1
+kind: ResourceGraphDefinition
+metadata:
+  name: teamekscluster
+spec:
+  schema:
+    apiVersion: v1alpha1
+    kind: TeamEKSCluster
+    spec:
+      team: string
+      name: string
+      env: string
+      kubernetesVersion: string
+      network: string | default="platform-default"
+      nodeGroup:
+        instanceType: string
+        minSize: integer
+        desiredSize: integer
+        maxSize: integer
+    status:
+      clusterName: ${cluster.spec.name}
+      clusterARN: ${cluster.status.ackResourceMetadata.arn}
+      endpoint: ${cluster.status.endpoint}
+      oidcIssuer: ${cluster.status.identity.oidc.issuer}
+      clusterStatus: ${cluster.status.status}
+      nodegroupStatus: ${nodegroup.status.status}
+      vpcID: ${vpc.status.vpcID}
+      subnetIDs: ${[subnetA.status.subnetID, subnetB.status.subnetID]}
+      # ACTIVE in moto is not enough: no child may carry an ACK Terminal condition
+      ready: ${cluster.status.status == "ACTIVE" && nodegroup.status.status == "ACTIVE" && [clusterRole, nodeRole, cluster, nodegroup].all(r, !has(r.status.conditions) || !r.status.conditions.exists(c, c.type == "ACK.Terminal" && c.status == "True"))}
+  resources:
+    # Tier 1, owned by the platform: read only (kro RBAC grants get/list/watch on these kinds)
+    - id: vpc
+      externalRef:
+        apiVersion: ec2.services.k8s.aws/v1alpha1
+        kind: VPC
+        metadata: {name: platform-vpc, namespace: platform-network}
+    - id: subnetA
+      externalRef:
+        apiVersion: ec2.services.k8s.aws/v1alpha1
+        kind: Subnet
+        metadata: {name: platform-subnet-a, namespace: platform-network}
+    - id: subnetB
+      externalRef:
+        apiVersion: ec2.services.k8s.aws/v1alpha1
+        kind: Subnet
+        metadata: {name: platform-subnet-b, namespace: platform-network}
+    - id: sg
+      externalRef:
+        apiVersion: ec2.services.k8s.aws/v1alpha1
+        kind: SecurityGroup
+        metadata: {name: platform-cluster-sg, namespace: platform-network}
+
+    # Tier 2, owned by the team claim
+    - id: clusterRole
+      readyWhen:
+        - ${clusterRole.status.conditions.exists(c, c.type == "ACK.ResourceSynced" && c.status == "True")}
+      template:
+        apiVersion: iam.services.k8s.aws/v1alpha1
+        kind: Role
+        metadata:
+          name: ${schema.spec.team}-${schema.spec.name}-${schema.spec.env}-cluster
+          annotations: '${schema.spec.env == "prod" ? {"services.k8s.aws/deletion-policy": "retain", "services.k8s.aws/adoption-policy": "adopt-or-create", "services.k8s.aws/adoption-fields": "{\"name\":\"" + schema.spec.team + "-" + schema.spec.name + "-prod-cluster\"}"} : {"services.k8s.aws/deletion-policy": "delete"}}'
+        spec:
+          name: ${schema.spec.team}-${schema.spec.name}-${schema.spec.env}-cluster
+          assumeRolePolicyDocument: '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"eks.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
+          policies:
+            - arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
+          tags:
+            - {key: team, value: "${schema.spec.team}"}
+            - {key: env, value: "${schema.spec.env}"}
+    - id: nodeRole
+      readyWhen:
+        - ${nodeRole.status.conditions.exists(c, c.type == "ACK.ResourceSynced" && c.status == "True")}
+      template:
+        apiVersion: iam.services.k8s.aws/v1alpha1
+        kind: Role
+        metadata:
+          name: ${schema.spec.team}-${schema.spec.name}-${schema.spec.env}-node
+          annotations: '${schema.spec.env == "prod" ? {"services.k8s.aws/deletion-policy": "retain", "services.k8s.aws/adoption-policy": "adopt-or-create", "services.k8s.aws/adoption-fields": "{\"name\":\"" + schema.spec.team + "-" + schema.spec.name + "-prod-node\"}"} : {"services.k8s.aws/deletion-policy": "delete"}}'
+        spec:
+          name: ${schema.spec.team}-${schema.spec.name}-${schema.spec.env}-node
+          assumeRolePolicyDocument: '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"ec2.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
+          policies:
+            - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+            - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+            - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+          tags:
+            - {key: team, value: "${schema.spec.team}"}
+            - {key: env, value: "${schema.spec.env}"}
+    - id: cluster
+      readyWhen:
+        - ${cluster.status.status == "ACTIVE" && (!has(cluster.status.conditions) || !cluster.status.conditions.exists(c, c.type == "ACK.Terminal" && c.status == "True"))}
+      template:
+        apiVersion: eks.services.k8s.aws/v1alpha1
+        kind: Cluster
+        metadata:
+          name: ${schema.spec.team}-${schema.spec.name}-${schema.spec.env}
+          # clientRequestToken is random per create (an adopted cluster has none): never let it drive an update
+          annotations: '${schema.spec.env == "prod" ? {"services.k8s.aws/deletion-policy": "retain", "services.k8s.aws/adoption-policy": "adopt-or-create", "services.k8s.aws/adoption-fields": "{\"name\":\"" + schema.spec.team + "-" + schema.spec.name + "-prod\"}", "services.k8s.aws/ignore-field-drift": "spec.clientRequestToken"} : {"services.k8s.aws/deletion-policy": "delete", "services.k8s.aws/ignore-field-drift": "spec.clientRequestToken"}}'
+        spec:
+          name: ${schema.spec.team}-${schema.spec.name}-${schema.spec.env}
+          version: ${schema.spec.kubernetesVersion}
+          # Declared = what CreateCluster defaults to, so an adopted cluster shows no drift.
+          # NOT declared on purpose: deletionProtection, controlPlaneScalingConfig, controlPlaneEgressMode (F-4).
+          kubernetesNetworkConfig:
+            serviceIPv4CIDR: 172.20.0.0/16
+          logging:
+            clusterLogging:
+              - enabled: false
+                types: [api, audit, authenticator, controllerManager, scheduler]
+          roleARN: ${clusterRole.status.ackResourceMetadata.arn}
+          resourcesVPCConfig:
+            subnetIDs:
+              - ${subnetA.status.subnetID}
+              - ${subnetB.status.subnetID}
+            securityGroupIDs:
+              - ${sg.status.id}
+            endpointPublicAccess: true
+            endpointPrivateAccess: true
+          tags:
+            team: ${schema.spec.team}
+            env: ${schema.spec.env}
+    - id: nodegroup
+      readyWhen:
+        - ${nodegroup.status.status == "ACTIVE" && (!has(nodegroup.status.conditions) || !nodegroup.status.conditions.exists(c, c.type == "ACK.Terminal" && c.status == "True"))}
+      template:
+        apiVersion: eks.services.k8s.aws/v1alpha1
+        kind: Nodegroup
+        metadata:
+          name: ${schema.spec.team}-${schema.spec.name}-${schema.spec.env}-ng
+          # moto defaults (AMI type, capacity, disk, a fake SSH key) appear on an adopted node group: never update for them
+          annotations: '${schema.spec.env == "prod" ? {"services.k8s.aws/deletion-policy": "retain", "services.k8s.aws/adoption-policy": "adopt-or-create", "services.k8s.aws/adoption-fields": "{\"name\":\"" + schema.spec.team + "-" + schema.spec.name + "-prod-ng\",\"clusterName\":\"" + schema.spec.team + "-" + schema.spec.name + "-prod\"}", "services.k8s.aws/ignore-field-drift": "spec.amiType,spec.capacityType,spec.diskSize,spec.remoteAccess"} : {"services.k8s.aws/deletion-policy": "delete", "services.k8s.aws/ignore-field-drift": "spec.amiType,spec.capacityType,spec.diskSize,spec.remoteAccess"}}'
+        spec:
+          name: ${schema.spec.team}-${schema.spec.name}-${schema.spec.env}-ng
+          # a reference (not a literal) so kro creates the node group after the cluster and deletes it first (F-9)
+          clusterName: ${cluster.spec.name}
+          nodeRole: ${nodeRole.status.ackResourceMetadata.arn}
+          instanceTypes:
+            - ${schema.spec.nodeGroup.instanceType}
+          scalingConfig:
+            minSize: ${schema.spec.nodeGroup.minSize}
+            desiredSize: ${schema.spec.nodeGroup.desiredSize}
+            maxSize: ${schema.spec.nodeGroup.maxSize}
+          subnets:
+            - ${subnetA.status.subnetID}
+            - ${subnetB.status.subnetID}
+          tags:
+            team: ${schema.spec.team}
+            env: ${schema.spec.env}
