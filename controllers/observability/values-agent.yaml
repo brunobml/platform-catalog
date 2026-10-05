@@ -87,6 +87,25 @@ serverFiles:
         kubernetes_sd_configs: [{role: pod, namespaces: {names: [ack-system]}}]
         relabel_configs:
           - {source_labels: [__meta_kubernetes_pod_container_port_number], regex: "8080", action: keep}
+          - {source_labels: [__meta_kubernetes_pod_name], regex: ".*ack-sqs.*", action: keep}
+          - {source_labels: [__meta_kubernetes_pod_name], target_label: pod}
+      - job_name: ack-ec2
+        kubernetes_sd_configs: [{role: pod, namespaces: {names: [ack-system]}}]
+        relabel_configs:
+          - {source_labels: [__meta_kubernetes_pod_container_port_number], regex: "8080", action: keep}
+          - {source_labels: [__meta_kubernetes_pod_name], regex: ".*ack-ec2.*", action: keep}
+          - {source_labels: [__meta_kubernetes_pod_name], target_label: pod}
+      - job_name: ack-iam
+        kubernetes_sd_configs: [{role: pod, namespaces: {names: [ack-system]}}]
+        relabel_configs:
+          - {source_labels: [__meta_kubernetes_pod_container_port_number], regex: "8080", action: keep}
+          - {source_labels: [__meta_kubernetes_pod_name], regex: ".*ack-iam.*", action: keep}
+          - {source_labels: [__meta_kubernetes_pod_name], target_label: pod}
+      - job_name: ack-eks
+        kubernetes_sd_configs: [{role: pod, namespaces: {names: [ack-system]}}]
+        relabel_configs:
+          - {source_labels: [__meta_kubernetes_pod_container_port_number], regex: "8080", action: keep}
+          - {source_labels: [__meta_kubernetes_pod_name], regex: ".*ack-eks.*", action: keep}
           - {source_labels: [__meta_kubernetes_pod_name], target_label: pod}
       - job_name: kyverno
         kubernetes_sd_configs: [{role: endpoints, namespaces: {names: [kyverno]}}]

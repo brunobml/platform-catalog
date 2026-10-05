@@ -1,0 +1,25 @@
+# P1 Tenant IaC: IAM controller for team EKS cluster and node roles.
+# Image pinned by multi-arch index digest of tag 1.9.1 from public.ecr.aws.
+image:
+  tag: "1.9.1@sha256:becbd2a3f82f22cf56077d31b05cd5ec88dc079519d219502687e12b03285a13"
+
+aws:
+  region: "us-east-1"
+  endpoint_url: "http://moto-cloud:5000"
+  allow_unsafe_aws_endpoint_urls: true
+  credentials:
+    secretName: "ack-aws-creds"
+    secretKey: "credentials"
+    profile: "default"
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+
+reconcile:
+  defaultResyncPeriod: 300
+  resources: [Role]

@@ -1,0 +1,110 @@
+# Tier-1 Platform Network (prod)
+# Deployed to spoke-prod by ApplicationSet platform-network in namespace platform-network (account 222222222222).
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: VPC
+metadata:
+  name: platform-vpc
+  namespace: platform-network
+  annotations:
+    services.k8s.aws/deletion-policy: retain
+spec:
+  cidrBlocks:
+    - "10.20.0.0/16"
+  enableDNSSupport: true
+  enableDNSHostnames: true
+  tags:
+    - key: Name
+      value: platform-prod
+    - key: platform.lab/tier
+      value: network
+---
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: InternetGateway
+metadata:
+  name: platform-igw
+  namespace: platform-network
+  annotations:
+    services.k8s.aws/deletion-policy: retain
+spec:
+  vpcRef:
+    from:
+      name: platform-vpc
+---
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: RouteTable
+metadata:
+  name: platform-public
+  namespace: platform-network
+  annotations:
+    services.k8s.aws/deletion-policy: retain
+spec:
+  vpcRef:
+    from:
+      name: platform-vpc
+  routes:
+    - destinationCIDRBlock: 0.0.0.0/0
+      gatewayRef:
+        from:
+          name: platform-igw
+---
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: Subnet
+metadata:
+  name: platform-subnet-a
+  namespace: platform-network
+  annotations:
+    services.k8s.aws/deletion-policy: retain
+    services.k8s.aws/ignore-field-drift: spec.availabilityZoneID
+spec:
+  vpcRef:
+    from:
+      name: platform-vpc
+  cidrBlock: 10.20.0.0/20
+  availabilityZone: us-east-1a
+  mapPublicIPOnLaunch: true
+  assignIPv6AddressOnCreation: false
+  ipv6Native: false
+  enableResourceNameDNSARecord: false
+  enableResourceNameDNSAAAARecord: false
+  hostnameType: ip-name
+  routeTableRefs:
+    - from:
+        name: platform-public
+---
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: Subnet
+metadata:
+  name: platform-subnet-b
+  namespace: platform-network
+  annotations:
+    services.k8s.aws/deletion-policy: retain
+    services.k8s.aws/ignore-field-drift: spec.availabilityZoneID
+spec:
+  vpcRef:
+    from:
+      name: platform-vpc
+  cidrBlock: 10.20.16.0/20
+  availabilityZone: us-east-1b
+  mapPublicIPOnLaunch: true
+  assignIPv6AddressOnCreation: false
+  ipv6Native: false
+  enableResourceNameDNSARecord: false
+  enableResourceNameDNSAAAARecord: false
+  hostnameType: ip-name
+  routeTableRefs:
+    - from:
+        name: platform-public
+---
+apiVersion: ec2.services.k8s.aws/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: platform-cluster-sg
+  namespace: platform-network
+  annotations:
+    services.k8s.aws/deletion-policy: retain
+spec:
+  name: platform-cluster-sg
+  description: Team EKS clusters (platform-owned)
+  vpcRef:
+    from:
+      name: platform-vpc

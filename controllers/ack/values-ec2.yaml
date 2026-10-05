@@ -1,0 +1,28 @@
+# P1 Tenant IaC: EC2 controller for tier-1 platform-network.
+# Image pinned by multi-arch index digest of tag 1.21.2 from public.ecr.aws.
+image:
+  tag: "1.21.2@sha256:c0a979b313b01f3be752434a838a028f80b4c45dcaeb10f1fc85f745574c3f02"
+
+aws:
+  region: "us-east-1"
+  endpoint_url: "http://moto-cloud:5000"
+  allow_unsafe_aws_endpoint_urls: true
+  credentials:
+    secretName: "ack-aws-creds"
+    secretKey: "credentials"
+    profile: "default"
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+
+reconcile:
+  defaultResyncPeriod: 300
+  resources: [VPC, Subnet, InternetGateway, RouteTable, SecurityGroup]
+
+featureGates:
+  IgnoreFieldDrift: true
