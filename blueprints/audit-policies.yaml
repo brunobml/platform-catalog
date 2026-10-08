@@ -4,7 +4,7 @@
 # Scope: every namespace (tenants and platform) except kube-system (managed by k3s, not by GitOps),
 # kyverno (Kyverno does not police itself) and kube-public/kube-node-lease (no workloads); new
 # namespaces are covered automatically. tenant-images-signed (Deny) stays tenant-only.
-# Kyverno's autogen also evaluates the Deployments, StatefulSets, DaemonSets and Jobs behind the pods.
+# Autogen also evaluates the Deployments, DaemonSets, StatefulSets, Jobs and CronJobs behind the pods (not ReplicaSets).
 # failurePolicy Ignore: if Kyverno is down or slow, these policies fail open (tenant-images-signed stays Fail).
 # To enforce one later: validationActions [Deny] (and failurePolicy Fail), after its PolicyReports show no failures.
 apiVersion: policies.kyverno.io/v1
@@ -23,6 +23,11 @@ spec:
   evaluation:
     background:
       enabled: true
+  autogen:
+    # evaluate what people manage, not ReplicaSets: old ReplicaSets (scaled to 0, kept for rollbacks)
+    # would keep reporting outdated pod templates, and every workload would count three times
+    podControllers:
+      controllers: [deployments, daemonsets, statefulsets, jobs, cronjobs]
   matchConstraints:
     namespaceSelector:
       matchExpressions:
@@ -54,6 +59,11 @@ spec:
   evaluation:
     background:
       enabled: true
+  autogen:
+    # evaluate what people manage, not ReplicaSets: old ReplicaSets (scaled to 0, kept for rollbacks)
+    # would keep reporting outdated pod templates, and every workload would count three times
+    podControllers:
+      controllers: [deployments, daemonsets, statefulsets, jobs, cronjobs]
   matchConstraints:
     namespaceSelector:
       matchExpressions:
@@ -83,6 +93,11 @@ spec:
   evaluation:
     background:
       enabled: true
+  autogen:
+    # evaluate what people manage, not ReplicaSets: old ReplicaSets (scaled to 0, kept for rollbacks)
+    # would keep reporting outdated pod templates, and every workload would count three times
+    podControllers:
+      controllers: [deployments, daemonsets, statefulsets, jobs, cronjobs]
   matchConstraints:
     namespaceSelector:
       matchExpressions:
@@ -112,6 +127,11 @@ spec:
   evaluation:
     background:
       enabled: true
+  autogen:
+    # evaluate what people manage, not ReplicaSets: old ReplicaSets (scaled to 0, kept for rollbacks)
+    # would keep reporting outdated pod templates, and every workload would count three times
+    podControllers:
+      controllers: [deployments, daemonsets, statefulsets, jobs, cronjobs]
   matchConstraints:
     namespaceSelector:
       matchExpressions:
@@ -144,6 +164,11 @@ spec:
   evaluation:
     background:
       enabled: true
+  autogen:
+    # evaluate what people manage, not ReplicaSets: old ReplicaSets (scaled to 0, kept for rollbacks)
+    # would keep reporting outdated pod templates, and every workload would count three times
+    podControllers:
+      controllers: [deployments, daemonsets, statefulsets, jobs, cronjobs]
   matchConstraints:
     namespaceSelector:
       matchExpressions:
