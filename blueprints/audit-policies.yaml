@@ -1,8 +1,10 @@
-# Tenant best-practice policies in Audit mode (2026-10-08): they never block a deployment, they
+# Best-practice policies in Audit mode (2026-10-08): they never block a deployment, they
 # only report. Results appear as PolicyReports (admission and background scans) in Policy Reporter,
 # http://policy-reporter.localhost, grouped by category with their severity.
-# Scope: the tenant namespaces (opt-in label platform.lab/image-verification=enabled, the same as
-# tenant-images-signed). Kyverno's autogen also evaluates the Deployments that create the pods.
+# Scope: every namespace (tenants and platform) except kube-system (managed by k3s, not by GitOps),
+# kyverno (Kyverno does not police itself) and kube-public/kube-node-lease (no workloads); new
+# namespaces are covered automatically. tenant-images-signed (Deny) stays tenant-only.
+# Kyverno's autogen also evaluates the Deployments, StatefulSets, DaemonSets and Jobs behind the pods.
 # failurePolicy Ignore: if Kyverno is down or slow, these policies fail open (tenant-images-signed stays Fail).
 # To enforce one later: validationActions [Deny] (and failurePolicy Fail), after its PolicyReports show no failures.
 apiVersion: policies.kyverno.io/v1
@@ -23,8 +25,8 @@ spec:
       enabled: true
   matchConstraints:
     namespaceSelector:
-      matchLabels:
-        platform.lab/image-verification: "enabled"
+      matchExpressions:
+        - {key: kubernetes.io/metadata.name, operator: NotIn, values: [kube-system, kyverno, kube-public, kube-node-lease]}
     resourceRules:
       - apiGroups: [""]
         apiVersions: ["v1"]
@@ -54,8 +56,8 @@ spec:
       enabled: true
   matchConstraints:
     namespaceSelector:
-      matchLabels:
-        platform.lab/image-verification: "enabled"
+      matchExpressions:
+        - {key: kubernetes.io/metadata.name, operator: NotIn, values: [kube-system, kyverno, kube-public, kube-node-lease]}
     resourceRules:
       - apiGroups: [""]
         apiVersions: ["v1"]
@@ -83,8 +85,8 @@ spec:
       enabled: true
   matchConstraints:
     namespaceSelector:
-      matchLabels:
-        platform.lab/image-verification: "enabled"
+      matchExpressions:
+        - {key: kubernetes.io/metadata.name, operator: NotIn, values: [kube-system, kyverno, kube-public, kube-node-lease]}
     resourceRules:
       - apiGroups: [""]
         apiVersions: ["v1"]
@@ -112,8 +114,8 @@ spec:
       enabled: true
   matchConstraints:
     namespaceSelector:
-      matchLabels:
-        platform.lab/image-verification: "enabled"
+      matchExpressions:
+        - {key: kubernetes.io/metadata.name, operator: NotIn, values: [kube-system, kyverno, kube-public, kube-node-lease]}
     resourceRules:
       - apiGroups: [""]
         apiVersions: ["v1"]
@@ -144,8 +146,8 @@ spec:
       enabled: true
   matchConstraints:
     namespaceSelector:
-      matchLabels:
-        platform.lab/image-verification: "enabled"
+      matchExpressions:
+        - {key: kubernetes.io/metadata.name, operator: NotIn, values: [kube-system, kyverno, kube-public, kube-node-lease]}
     resourceRules:
       - apiGroups: [""]
         apiVersions: ["v1"]
