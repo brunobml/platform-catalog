@@ -1,0 +1,156 @@
+# Tenant best-practice policies in Audit mode (2026-10-08): they never block a deployment, they
+# only report. Results appear as PolicyReports (admission and background scans) in Policy Reporter,
+# http://policy-reporter.localhost, grouped by category with their severity.
+# Scope: the tenant namespaces (opt-in label platform.lab/image-verification=enabled, the same as
+# tenant-images-signed). Kyverno's autogen also evaluates the Deployments that create the pods.
+# failurePolicy Ignore: if Kyverno is down or slow, these policies fail open (tenant-images-signed stays Fail).
+# To enforce one later: validationActions [Deny] (and failurePolicy Fail), after its PolicyReports show no failures.
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: require-resource-limits
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+    policies.kyverno.io/title: Require CPU and memory limits
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/description: "Every container sets CPU and memory limits, so one workload cannot starve the node."
+spec:
+  validationActions: [Audit]
+  failurePolicy: Ignore   # audit only: never let Kyverno trouble block a pod
+  evaluation:
+    background:
+      enabled: true
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        platform.lab/image-verification: "enabled"
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+  validations:
+    - expression: >-
+        object.spec.containers.all(c, has(c.resources) && has(c.resources.limits) &&
+        'cpu' in c.resources.limits && 'memory' in c.resources.limits)
+      message: "every container must set resources.limits.cpu and resources.limits.memory"
+---
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: require-health-probes
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+    policies.kyverno.io/title: Require readiness and liveness probes
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/description: "Every container has a readiness probe (no traffic before it is ready) and a liveness probe (restart when it hangs)."
+spec:
+  validationActions: [Audit]
+  failurePolicy: Ignore   # audit only: never let Kyverno trouble block a pod
+  evaluation:
+    background:
+      enabled: true
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        platform.lab/image-verification: "enabled"
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+  validations:
+    - expression: "object.spec.containers.all(c, has(c.readinessProbe) && has(c.livenessProbe))"
+      message: "every container must define readinessProbe and livenessProbe"
+---
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: require-image-digest
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+    policies.kyverno.io/title: Pin images by digest
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/description: "Images are referenced by digest (@sha256:...), so a moved tag cannot change what runs."
+spec:
+  validationActions: [Audit]
+  failurePolicy: Ignore   # audit only: never let Kyverno trouble block a pod
+  evaluation:
+    background:
+      enabled: true
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        platform.lab/image-verification: "enabled"
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+  validations:
+    - expression: "object.spec.containers.all(c, c.image.contains('@sha256:'))"
+      message: "every container image must be pinned by digest (image@sha256:...)"
+---
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: require-recommended-labels
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+    policies.kyverno.io/title: Require Kubernetes recommended labels
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: low
+    policies.kyverno.io/description: "Pods carry app.kubernetes.io/name and app.kubernetes.io/part-of, so tools can group them by application."
+spec:
+  validationActions: [Audit]
+  failurePolicy: Ignore   # audit only: never let Kyverno trouble block a pod
+  evaluation:
+    background:
+      enabled: true
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        platform.lab/image-verification: "enabled"
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+  validations:
+    - expression: >-
+        has(object.metadata.labels) &&
+        'app.kubernetes.io/name' in object.metadata.labels &&
+        'app.kubernetes.io/part-of' in object.metadata.labels
+      message: "pods must carry the labels app.kubernetes.io/name and app.kubernetes.io/part-of"
+---
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: restrict-service-types
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+    policies.kyverno.io/title: No NodePort or LoadBalancer Services
+    policies.kyverno.io/category: Network Security
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/description: "Tenant Services stay inside the cluster (ClusterIP); external traffic enters through the ingress."
+spec:
+  validationActions: [Audit]
+  failurePolicy: Ignore   # audit only: never let Kyverno trouble block a pod
+  evaluation:
+    background:
+      enabled: true
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        platform.lab/image-verification: "enabled"
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["services"]
+  validations:
+    - expression: "!has(object.spec.type) || !(object.spec.type in ['NodePort', 'LoadBalancer'])"
+      message: "Services must not be of type NodePort or LoadBalancer; use the ingress"

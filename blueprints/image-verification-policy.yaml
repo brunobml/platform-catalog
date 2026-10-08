@@ -15,6 +15,10 @@ metadata:
     # The ImageValidatingPolicy CRD comes with Kyverno (addons-spoke-kyverno); on a cluster where
     # both arrive together, skip the dry-run until the CRD exists (Argo CD retries the sync).
     argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+    # read by Policy Reporter (title, grouping by category, severity of failures)
+    policies.kyverno.io/title: Signed tenant images
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: high
     policies.kyverno.io/description: "orders-processor images must be signed and SBOM-attested by its CI workflow"
 spec:
   validationActions: [Deny]
