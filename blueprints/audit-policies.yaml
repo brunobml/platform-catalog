@@ -181,3 +181,38 @@ spec:
   validations:
     - expression: "!has(object.spec.type) || !(object.spec.type in ['NodePort', 'LoadBalancer'])"
       message: "Services must not be of type NodePort or LoadBalancer; use the ingress"
+---
+# Cluster-scoped: checks Namespace objects themselves, so its results appear under "Cluster Scoped
+# Results" in Policy Reporter. Every namespace except the k3s system ones must enforce Pod Security
+# baseline or restricted; `default` is checked on purpose (pods created there would be unprotected).
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: require-pod-security-namespace-label
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+    policies.kyverno.io/title: Namespaces enforce Pod Security
+    policies.kyverno.io/category: Pod Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: "Every namespace (except the k3s system namespaces) sets pod-security.kubernetes.io/enforce to baseline or restricted, so no pod in it can run privileged."
+spec:
+  validationActions: [Audit]
+  failurePolicy: Ignore   # audit only: never let Kyverno trouble block a namespace
+  evaluation:
+    background:
+      enabled: true
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["namespaces"]
+  matchConditions:
+    - name: not-a-k3s-system-namespace
+      expression: "!(object.metadata.name in ['kube-system', 'kube-public', 'kube-node-lease'])"
+  validations:
+    - expression: >-
+        has(object.metadata.labels) &&
+        'pod-security.kubernetes.io/enforce' in object.metadata.labels &&
+        object.metadata.labels['pod-security.kubernetes.io/enforce'] in ['baseline', 'restricted']
+      message: "namespace must set the label pod-security.kubernetes.io/enforce to baseline or restricted"
