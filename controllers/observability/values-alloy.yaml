@@ -5,6 +5,9 @@ image:
 configReloader:
   image:
     digest: "sha256:142a1f11df8dd165f00375b0b1826aecb9c9adeb05c39855893138d7c7575ff7"  # v0.94.0
+  resources:                           # audit policy require-resource-limits (chart default: requests only)
+    requests: {cpu: 10m, memory: 50Mi}
+    limits: {memory: 96Mi}
   securityContext:                     # Phase 5 F.0: PSS restricted
     allowPrivilegeEscalation: false
     readOnlyRootFilesystem: true

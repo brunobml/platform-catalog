@@ -15,6 +15,9 @@ configmapReload:
       capabilities: {drop: ["ALL"]}
     image:
       digest: "sha256:06b52bd4dbe3ed6dd5905aadaf8b9987d9da4c31d37bb86deaadae68cee2d26b"  # v0.94.1
+    resources:                             # audit policy require-resource-limits
+      requests: {cpu: 5m, memory: 16Mi}
+      limits: {memory: 64Mi}
 
 server:
   securityContext:

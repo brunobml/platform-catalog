@@ -13,10 +13,10 @@ metadata:
   name: require-resource-limits
   annotations:
     argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
-    policies.kyverno.io/title: Require CPU and memory limits
+    policies.kyverno.io/title: Require memory limits and CPU requests
     policies.kyverno.io/category: Best Practices
     policies.kyverno.io/severity: medium
-    policies.kyverno.io/description: "Every container sets CPU and memory limits, so one workload cannot starve the node."
+    policies.kyverno.io/description: "Every container sets a memory limit (a leak cannot exhaust the node) and a CPU request (the scheduler reserves its share). CPU limits are optional on purpose: they throttle a pod even on an idle node, which hurts latency-sensitive components such as the Kyverno webhook or Prometheus."
 spec:
   validationActions: [Audit]
   failurePolicy: Ignore   # audit only: never let Kyverno trouble block a pod
@@ -39,9 +39,10 @@ spec:
         resources: ["pods"]
   validations:
     - expression: >-
-        object.spec.containers.all(c, has(c.resources) && has(c.resources.limits) &&
-        'cpu' in c.resources.limits && 'memory' in c.resources.limits)
-      message: "every container must set resources.limits.cpu and resources.limits.memory"
+        object.spec.containers.all(c, has(c.resources) &&
+        has(c.resources.limits) && 'memory' in c.resources.limits &&
+        has(c.resources.requests) && 'cpu' in c.resources.requests)
+      message: "every container must set resources.limits.memory and resources.requests.cpu (CPU limits are optional)"
 ---
 apiVersion: policies.kyverno.io/v1
 kind: ValidatingPolicy
