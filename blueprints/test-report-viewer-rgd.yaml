@@ -8,6 +8,7 @@ spec:
     kind: TestReportViewer
     spec:
       bucketName: string
+      retentionDays: integer
       replicas: integer
       image: string
       ingressHost: string
@@ -27,6 +28,8 @@ spec:
           namespace: kube-system
 
     - id: bucket
+      readyWhen:
+        - ${bucket.status.conditions.exists(c, c.type == "ACK.ResourceSynced" && c.status == "True")}
       template:
         apiVersion: s3.services.k8s.aws/v1alpha1
         kind: Bucket
@@ -34,6 +37,8 @@ spec:
           name: ${schema.spec.bucketName}
           annotations:
             services.k8s.aws/deletion-policy: retain
+            services.k8s.aws/adoption-policy: adopt-or-create
+            services.k8s.aws/adoption-fields: '${"{\"name\":\"" + schema.spec.bucketName + "\"}"}'
           ownerReferences:
             - apiVersion: kro.run/v1alpha1
               kind: ${schema.kind}
@@ -43,6 +48,10 @@ spec:
               blockOwnerDeletion: true
         spec:
           name: ${schema.spec.bucketName}
+          encryption:
+            rules:
+              - applyServerSideEncryptionByDefault:
+                  sseAlgorithm: AES256
 
     - id: serviceaccount
       template:
@@ -177,6 +186,16 @@ spec:
                       value: "http://moto-cloud:5000"
                     - name: S3_BUCKET_NAME
                       value: ${schema.spec.bucketName}
+                    - name: AWS_ACCESS_KEY_ID
+                      valueFrom:
+                        secretKeyRef:
+                          name: bats-reporter-s3
+                          key: AWS_ACCESS_KEY_ID
+                    - name: AWS_SECRET_ACCESS_KEY
+                      valueFrom:
+                        secretKeyRef:
+                          name: bats-reporter-s3
+                          key: AWS_SECRET_ACCESS_KEY
                     - name: GIT_REPO_URL
                       value: ${schema.spec.resultsRepoUrl}
                     - name: GIT_CACHE_DIR
@@ -201,7 +220,7 @@ spec:
                     failureThreshold: 3
                   readinessProbe:
                     httpGet:
-                      path: /healthz
+                      path: /readyz
                       port: http
                     initialDelaySeconds: 5
                     periodSeconds: 10
@@ -264,6 +283,8 @@ spec:
                 - protocol: TCP
                   port: 53
             # Moto Cloud
+            # k3d-cloud-net is pinned to 172.21.0.0/16 by setup-hub-spoke.sh.
+            # Revalidate this CIDR if the Docker network is recreated differently.
             - to:
                 - ipBlock:
                     cidr: 172.21.0.0/16
@@ -271,6 +292,9 @@ spec:
                 - protocol: TCP
                   port: 5000
             # GitHub HTTPS
+            # Standard Kubernetes NetworkPolicy has no hostname selector.
+            # This permits HTTPS egress broadly; an FQDN-aware CNI is needed
+            # for a narrower github.com rule.
             - to:
                 - ipBlock:
                     cidr: 0.0.0.0/0
