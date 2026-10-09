@@ -183,6 +183,11 @@ spec:
           labels:
             app: ${schema.spec.name}-${schema.spec.environment}-worker
             environment: ${schema.spec.environment}
+            # Kubernetes recommended labels (audit policy require-recommended-labels); not in the
+            # selector, which must stay as it is (a Deployment's selector is immutable)
+            app.kubernetes.io/name: ${schema.spec.name}
+            app.kubernetes.io/component: worker
+            app.kubernetes.io/part-of: ${schema.spec.name}
           ownerReferences:
             - apiVersion: kro.run/v1alpha1
               kind: ${schema.kind}
@@ -200,6 +205,9 @@ spec:
               labels:
                 app: ${schema.spec.name}-${schema.spec.environment}-worker
                 environment: ${schema.spec.environment}
+                app.kubernetes.io/name: ${schema.spec.name}
+                app.kubernetes.io/component: worker
+                app.kubernetes.io/part-of: ${schema.spec.name}
             spec:
               serviceAccountName: ${serviceaccount.metadata.name}
               automountServiceAccountToken: false
