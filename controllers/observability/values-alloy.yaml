@@ -3,6 +3,7 @@
 image:
   digest: "sha256:f111cce835516c5f99166342be7038496b52ced16667be5a11e19258a3e4cd30"  # v1.20.0
 configReloader:
+  enabled: false
   image:
     digest: "sha256:142a1f11df8dd165f00375b0b1826aecb9c9adeb05c39855893138d7c7575ff7"  # v0.94.0
   resources:                           # audit policy require-resource-limits (chart default: requests only)
@@ -49,6 +50,8 @@ controller:
         emptyDir: {}
       - name: remote-write
         secret: {secretName: remote-write-credentials}   # scripts/setup-observability-secrets.sh
+  podLabels:
+    app.kubernetes.io/part-of: platform-addons
 alloy:
   storagePath: /tmp/alloy
   stabilityLevel: generally-available
@@ -68,6 +71,11 @@ alloy:
       - {name: remote-write, mountPath: /etc/secrets/remote-write, readOnly: true}
   extraEnv:
     - {name: CLUSTER, value: SET-BY-APPLICATIONSET}
+  livenessProbe:
+    httpGet: {path: /-/ready, port: 12345}
+    initialDelaySeconds: 30
+    periodSeconds: 30
+    failureThreshold: 5
   configMap:
     content: |
       // Pod logs through the Kubernetes API (no hostPath, no privileged pod).
