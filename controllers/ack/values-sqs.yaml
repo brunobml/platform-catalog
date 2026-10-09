@@ -23,3 +23,9 @@ resources:
 reconcile:
   defaultResyncPeriod: 300
 
+
+# Kubernetes recommended label on the Deployment and its pod template (audit policy
+# require-recommended-labels); the chart applies deployment.labels to both, not to the selector.
+deployment:
+  labels:
+    app.kubernetes.io/part-of: platform-addons
