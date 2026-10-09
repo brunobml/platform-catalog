@@ -1,0 +1,27 @@
+image:
+  tag: "1.13.0@sha256:3a666a0c48fa16d664bfd88001c3dd4621fc1debe031f8304ac6e5719a67ff33"
+
+aws:
+  region: "us-east-1"
+  endpoint_url: "http://moto-cloud:5000"
+  allow_unsafe_aws_endpoint_urls: true
+  endpoint_use_path_style: true
+  credentials:
+    secretName: "ack-aws-creds"
+    secretKey: "credentials"
+    profile: "default"
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+
+reconcile:
+  defaultResyncPeriod: 300
+
+deployment:
+  labels:
+    app.kubernetes.io/part-of: platform-addons

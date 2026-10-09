@@ -1,0 +1,23 @@
+# Aggregated ClusterRole for kro controller to manage TestReportViewer instances and child resources.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kro-test-report-viewer
+  labels:
+    rbac.kro.run/aggregate-to-controller: "true"
+rules:
+  - apiGroups: ["kro.run"]
+    resources: ["testreportviewers", "testreportviewers/status", "testreportviewers/finalizers"]
+    verbs: ["*"]
+  - apiGroups: ["s3.services.k8s.aws"]
+    resources: ["buckets"]
+    verbs: ["*"]
+  - apiGroups: [""]
+    resources: ["configmaps", "services", "serviceaccounts"]
+    verbs: ["*"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["*"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "networkpolicies"]
+    verbs: ["*"]
